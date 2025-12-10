@@ -1,0 +1,141 @@
+### Task Hub Backend API Tests
+### Use REST Client extension in VS Code or similar tool
+
+@baseUrl = http://localhost:3000
+@token = 
+
+### 1. Health Check
+GET {{baseUrl}}/api/health
+
+### 2. Root Endpoint
+GET {{baseUrl}}/
+
+### 3. Sign Up
+POST {{baseUrl}}/api/auth/signup
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "password123"
+}
+
+### 4. Sign In
+POST {{baseUrl}}/api/auth/signin
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "password": "password123"
+}
+
+### 5. Get Current User (Replace @token with token from signup/signin)
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### 6. Create Task
+POST {{baseUrl}}/api/tasks
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Complete project documentation",
+  "description": "Write comprehensive documentation for the project",
+  "priority": "high",
+  "date": "2025-12-15",
+  "timeStart": "09:00 AM",
+  "timeEnd": "11:00 AM",
+  "referenceLinks": ["https://example.com/docs"]
+}
+
+### 7. Get All Tasks
+GET {{baseUrl}}/api/tasks
+Authorization: Bearer {{token}}
+
+### 8. Get Tasks by Date
+GET {{baseUrl}}/api/tasks?date=2025-12-15
+Authorization: Bearer {{token}}
+
+### 9. Get Tasks by Month
+GET {{baseUrl}}/api/tasks?month=2025-12
+Authorization: Bearer {{token}}
+
+### 10. Get Single Task (Replace :id with actual task ID)
+GET {{baseUrl}}/api/tasks/:id
+Authorization: Bearer {{token}}
+
+### 11. Update Task
+PUT {{baseUrl}}/api/tasks/:id
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "title": "Updated task title",
+  "priority": "medium"
+}
+
+### 12. Toggle Task Completion
+PATCH {{baseUrl}}/api/tasks/:id/complete
+Authorization: Bearer {{token}}
+
+### 13. Delete Task
+DELETE {{baseUrl}}/api/tasks/:id
+Authorization: Bearer {{token}}
+
+### 14. Analytics - Overview
+GET {{baseUrl}}/api/analytics/overview
+Authorization: Bearer {{token}}
+
+### 15. Analytics - Task Status
+GET {{baseUrl}}/api/analytics/task-status
+Authorization: Bearer {{token}}
+
+### 16. Analytics - Weekly Distribution
+GET {{baseUrl}}/api/analytics/weekly-distribution
+Authorization: Bearer {{token}}
+
+### 17. Analytics - Priority Distribution
+GET {{baseUrl}}/api/analytics/priority-distribution
+Authorization: Bearer {{token}}
+
+### 18. Analytics - Monthly Trend
+GET {{baseUrl}}/api/analytics/monthly-trend
+Authorization: Bearer {{token}}
+
+### 19. Get User Profile
+GET {{baseUrl}}/api/user/profile
+Authorization: Bearer {{token}}
+
+### 20. Update User Profile
+PUT {{baseUrl}}/api/user/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "John Doe Updated",
+  "title": "Senior Engineer"
+}
+
+### 21. Change Password
+PUT {{baseUrl}}/api/user/password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "currentPassword": "password123",
+  "newPassword": "newpassword123"
+}
+
+### 22. AI Chat
+POST {{baseUrl}}/api/ai/chat
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "message": "Help me organize my tasks for this week"
+}
+
+### 23. Logout
+POST {{baseUrl}}/api/auth/logout
+Authorization: Bearer {{token}}
+
