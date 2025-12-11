@@ -189,8 +189,8 @@ export default function CalendarPage() {
         response.data.tasks.forEach((apiTask: any) => {
           const task = convertApiTaskToCalendar(apiTask);
           const day = task.date;
-          // Only add tasks that are in the current month (date > 0)
-          if (day > 0) {
+          // Only add tasks that are in the current month (date > 0 and defined)
+          if (day && day > 0) {
             if (!grouped[day]) {
               grouped[day] = [];
             }
@@ -617,7 +617,7 @@ export default function CalendarPage() {
     try {
       const response = await apiClient.aiChat(userMessage);
       if (response.success && response.data?.response) {
-        setAiMessages(prev => [...prev, { role: 'ai', message: response.data.response }]);
+        setAiMessages(prev => [...prev, { role: 'ai', message: response.data!.response }]);
       }
     } catch (error: any) {
       console.error('AI chat error:', error);

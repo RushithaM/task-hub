@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://task-hub-oq63.onrender.com';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -160,7 +160,7 @@ class ApiClient {
       });
     }
     const queryString = params.toString();
-    return this.request(`/api/tasks${queryString ? `?${queryString}` : ''}`);
+    return this.request<{ tasks: any[] }>(`/api/tasks${queryString ? `?${queryString}` : ''}`);
   }
 
   async getTask(id: string) {
@@ -259,7 +259,7 @@ class ApiClient {
 
   // AI methods
   async aiChat(message: string) {
-    return this.request('/api/ai/chat', {
+    return this.request<{ response: string }>('/api/ai/chat', {
       method: 'POST',
       body: JSON.stringify({ message }),
     });
