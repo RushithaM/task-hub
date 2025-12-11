@@ -55,6 +55,19 @@ RULES:
 6. For update_task: fill the "task" object with fields to update. Title is optional for updates.
 
 7. For list_tasks: use "filters" to specify search criteria (date, priority, completed status, etc.).
+   - IMPORTANT: When date filters are present, convert relative date strings into structured date range objects.
+   - Date filter format: filters.date = { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }
+   - For single days (today, yesterday, tomorrow): use same date for both start and end.
+   - For ranges (this week, next week, this month, etc.): calculate the actual start and end dates.
+   - Handle all relative date patterns:
+     * Single days: "today", "yesterday", "tomorrow" → { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } (same date)
+     * Week ranges: "this week", "current week", "next week", "last week" → Monday to Sunday range
+     * Month ranges: "this month", "next month", "last month" → first day to last day of month
+     * Year ranges: "this year" → { "start": "YYYY-01-01", "end": "YYYY-12-31" }
+     * Relative days: "X days after", "X days before" → calculate the date and use as single day range
+     * Absolute dates: "2024-12-15" → { "start": "2024-12-15", "end": "2024-12-15" }
+   - Use the current date provided in the user prompt context to calculate relative dates accurately.
+   - Always return dates in YYYY-MM-DD format.
 
 8. For delete_task/update_task: extract "taskId" when possible from context or user message.
 
@@ -70,6 +83,11 @@ RULES:
  */
 export const buildUserPrompt = (userText, context = {}) => {
   let prompt = userText;
+
+  // Add current date for relative date calculations
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  prompt += `\n\nCurrent date: ${todayStr}`;
 
   if (context.recentTasks && context.recentTasks.length > 0) {
     prompt += `\n\nUser's recent tasks for context:\n`;
