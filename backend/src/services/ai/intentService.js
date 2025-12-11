@@ -83,6 +83,24 @@ export const parseIntent = async (userText, userId) => {
       notes: parsedResponse.notes || '',
     };
 
+    // Debug logging for AI response
+    logger.debug('AI parsed response:', {
+      intent,
+      payload,
+      originalMessage: userText,
+    });
+
+    // Special logging for create_task to track title extraction
+    if (intent === 'create_task') {
+      logger.debug('Create task payload structure:', {
+        hasTask: !!payload.task,
+        taskKeys: payload.task ? Object.keys(payload.task) : [],
+        taskTitle: payload.task?.title,
+        taskTitleType: typeof payload.task?.title,
+        fullTask: payload.task,
+      });
+    }
+
     return {
       intent,
       payload,

@@ -74,6 +74,141 @@ export const chat = async (userId, message) => {
 };
 
 /**
+ * Fallback function to extract task title from natural language message
+ * Used when AI fails to extract the title
+ * Handles various human language patterns for task creation
+ * @param {string} message - Original user message
+ * @returns {string|null} Extracted title or null if extraction fails
+ */
+const extractTitleFallback = (message) => {
+  if (!message || typeof message !== 'string') {
+    return null;
+  }
+
+  const trimmedMessage = message.trim();
+  const lowerMessage = trimmedMessage.toLowerCase();
+  
+  // Common task creation phrases to look for
+  const taskPhrases = [
+    'create a task',
+    'create task',
+    'add a task',
+    'add task',
+    'new task',
+    'make a task',
+    'make task',
+    'set a task',
+    'set task',
+    'add a todo',
+    'add todo',
+    'create a todo',
+    'new todo',
+    'remind me to',
+    'remind me',
+    'i need to',
+    'i have to',
+    'i should',
+    'i must',
+    'schedule',
+    'plan to',
+  ];
+
+  // Check if message contains task creation phrases
+  let hasTaskPhrase = false;
+  let taskPhraseIndex = -1;
+  let taskPhrase = '';
+
+  for (const phrase of taskPhrases) {
+    const index = lowerMessage.indexOf(phrase);
+    if (index !== -1) {
+      hasTaskPhrase = true;
+      taskPhraseIndex = index;
+      taskPhrase = phrase;
+      break;
+    }
+  }
+
+  // Pattern 1: Extract after task creation phrases
+  if (hasTaskPhrase) {
+    const afterPhrase = trimmedMessage.substring(taskPhraseIndex + taskPhrase.length).trim();
+    
+    // Remove leading words like "for", "to", "about", "on", "with"
+    const cleaned = afterPhrase.replace(/^(?:for|to|about|on|with|that|which)\s+/i, '').trim();
+    
+    if (cleaned.length > 0) {
+      let title = cleaned;
+      
+      // Remove trailing date/time references
+      title = title.replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '');
+      
+      // Remove trailing priority references
+      title = title.replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '');
+      
+      // Remove trailing time references
+      title = title.replace(/\s+at\s+\d{1,2}:\d{2}.*$/i, '');
+      
+      // Clean up common trailing phrases
+      title = title.replace(/\s+(?:please|thanks|thank you).*$/i, '');
+      
+      title = title.trim();
+      
+      if (title.length > 0 && title.length <= 100) {
+        return title;
+      }
+    }
+  }
+
+  // Pattern 2: Extract after common separators (dash, colon, etc.)
+  const separators = [
+    { pattern: /\s*-\s+/, name: 'dash' },
+    { pattern: /\s*:\s*/, name: 'colon' },
+    { pattern: /\s+for\s+/, name: 'for' },
+    { pattern: /\s+to\s+/, name: 'to' },
+    { pattern: /\s+about\s+/, name: 'about' },
+  ];
+
+  for (const sep of separators) {
+    const match = trimmedMessage.match(sep.pattern);
+    if (match && match.index !== undefined && match.index > 0) {
+      const afterSep = trimmedMessage.substring(match.index + match[0].length).trim();
+      
+      // Skip if it's just a date/time
+      if (!/^(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)/i.test(afterSep)) {
+        let title = afterSep;
+        
+        // Remove trailing date/time references
+        title = title.replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '');
+        
+        // Remove trailing priority references
+        title = title.replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '');
+        
+        title = title.trim();
+        
+        if (title.length > 0 && title.length <= 100) {
+          return title;
+        }
+      }
+    }
+  }
+
+  // Pattern 3: If message is short and doesn't contain task phrases, use the whole message
+  // (user might have just said "code clean up" expecting context)
+  if (trimmedMessage.length <= 100 && !hasTaskPhrase && trimmedMessage.split(/\s+/).length <= 10) {
+    // Remove date/time/priority references
+    let title = trimmedMessage
+      .replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '')
+      .replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '')
+      .trim();
+    
+    if (title.length > 0) {
+      return title;
+    }
+  }
+
+  return null;
+};
+
+/**
  * Validate task data extracted from AI
  * @param {Object} taskData - Task data to validate
  * @returns {Object} Validated and normalized task data
@@ -235,8 +370,44 @@ export const ask = async (userId, message) => {
       }
 
       case 'create_task': {
-        if (!payload.task || !payload.task.title) {
-          throw new Error('Task title is required to create a task');
+        // Log payload structure for debugging
+        logger.debug('Create task - payload received:', {
+          hasPayload: !!payload,
+          hasTask: !!payload.task,
+          taskKeys: payload.task ? Object.keys(payload.task) : [],
+          taskTitle: payload.task?.title,
+          taskTitleType: typeof payload.task?.title,
+          fullPayload: payload,
+          originalMessage: message,
+        });
+
+        // Ensure payload.task exists
+        if (!payload.task) {
+          payload.task = {};
+        }
+
+        // If title is missing, try fallback extraction
+        if (!payload.task.title || (typeof payload.task.title === 'string' && payload.task.title.trim().length === 0)) {
+          logger.warn('AI failed to extract task title, attempting fallback extraction', {
+            originalMessage: message,
+            taskObject: payload.task,
+          });
+          
+          const fallbackTitle = extractTitleFallback(message);
+          if (fallbackTitle) {
+            logger.info('Fallback title extraction successful', {
+              extractedTitle: fallbackTitle,
+              originalMessage: message,
+            });
+            payload.task.title = fallbackTitle;
+          } else {
+            logger.error('Create task failed - missing title (AI and fallback both failed):', {
+              payload,
+              originalMessage: message,
+              taskObject: payload.task,
+            });
+            throw new Error('Task title is required to create a task. Please specify what task you want to create.');
+          }
         }
 
         // Validate and normalize task data
@@ -254,19 +425,32 @@ export const ask = async (userId, message) => {
 
       case 'update_task': {
         if (!payload.taskId) {
-          throw new Error('Task ID is required to update a task');
+          logger.error('Update task failed - missing taskId:', {
+            payload,
+            originalMessage: message,
+          });
+          throw new Error('Task ID is required to update a task. Please specify which task you want to update.');
         }
 
         // Validate taskId format
         if (!mongoose.Types.ObjectId.isValid(payload.taskId)) {
-          throw new Error('Invalid task ID format');
+          logger.error('Update task failed - invalid taskId format:', {
+            taskId: payload.taskId,
+            originalMessage: message,
+          });
+          throw new Error(`Invalid task ID format: "${payload.taskId}". Task IDs must be valid MongoDB ObjectIds.`);
         }
 
         // Validate and normalize update data
         const validatedUpdate = validateTaskData(payload.task || {});
         
         if (Object.keys(validatedUpdate).length === 0) {
-          throw new Error('No valid fields provided for update');
+          logger.error('Update task failed - no valid fields provided:', {
+            payload,
+            originalMessage: message,
+            taskObject: payload.task,
+          });
+          throw new Error('No valid fields provided for update. Please specify what you want to change about the task.');
         }
 
         result = await taskService.updateTask(payload.taskId, userId, validatedUpdate);
@@ -276,12 +460,20 @@ export const ask = async (userId, message) => {
 
       case 'delete_task': {
         if (!payload.taskId) {
-          throw new Error('Task ID is required to delete a task');
+          logger.error('Delete task failed - missing taskId:', {
+            payload,
+            originalMessage: message,
+          });
+          throw new Error('Task ID is required to delete a task. Please specify which task you want to delete.');
         }
 
         // Validate taskId format
         if (!mongoose.Types.ObjectId.isValid(payload.taskId)) {
-          throw new Error('Invalid task ID format');
+          logger.error('Delete task failed - invalid taskId format:', {
+            taskId: payload.taskId,
+            originalMessage: message,
+          });
+          throw new Error(`Invalid task ID format: "${payload.taskId}". Task IDs must be valid MongoDB ObjectIds.`);
         }
 
         result = await taskService.deleteTask(payload.taskId, userId);
@@ -375,7 +567,12 @@ export const ask = async (userId, message) => {
       }
 
       default:
-        throw new Error(`Unsupported intent: ${intent}`);
+        logger.error('Unsupported intent received:', {
+          intent,
+          payload,
+          originalMessage: message,
+        });
+        throw new Error(`Unsupported intent: "${intent}". Supported intents are: list_tasks, create_task, update_task, delete_task, summarize_tasks, task_suggestions.`);
     }
 
     return {
@@ -384,7 +581,12 @@ export const ask = async (userId, message) => {
       result,
     };
   } catch (error) {
-    logger.error('AI ask error:', error);
+    logger.error('AI ask error:', {
+      message: error.message,
+      stack: error.stack,
+      originalUserMessage: message,
+      userId,
+    });
     throw error;
   }
 };
