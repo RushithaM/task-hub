@@ -74,135 +74,175 @@ export const chat = async (userId, message) => {
 };
 
 /**
- * Fallback function to extract task title from natural language message
- * Used when AI fails to extract the title
- * Handles various human language patterns for task creation
+ * AI-powered fallback to extract task details from natural language
+ * Uses Groq to intelligently parse task information when initial intent parsing fails
  * @param {string} message - Original user message
- * @returns {string|null} Extracted title or null if extraction fails
+ * @returns {Promise<Object|null>} Extracted task object or null if extraction fails
  */
-const extractTitleFallback = (message) => {
-  if (!message || typeof message !== 'string') {
+const extractTaskDetailsWithAI = async (message) => {
+  try {
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return null;
+    }
+
+    const client = getGroqClient();
+    
+    const extractionPrompt = `You are a task extraction assistant. Extract task details from the user's natural language message.
+
+Extract the following information if mentioned:
+- title (required - the main task description)
+- description (optional - additional details)
+- priority (optional - must be "low", "medium", or "high")
+- date (optional - in YYYY-MM-DD format)
+- timeStart (optional - start time if mentioned)
+- timeEnd (optional - end time if mentioned)
+
+Rules:
+1. Return ONLY valid JSON, no explanations
+2. If title cannot be determined, return null
+3. Convert relative dates (tomorrow, today, next week) to YYYY-MM-DD format
+4. Priority must be exactly "low", "medium", or "high" (default to "medium" if unclear)
+5. Extract time in HH:MM format if mentioned
+
+User message: "${message}"
+
+Return JSON in this format:
+{
+  "title": "extracted title or null",
+  "description": "extracted description or null",
+  "priority": "low|medium|high or null",
+  "date": "YYYY-MM-DD or null",
+  "timeStart": "HH:MM or null",
+  "timeEnd": "HH:MM or null"
+}`;
+
+    const completion = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are a task extraction assistant. Extract task details from natural language and return ONLY valid JSON, no explanations.' 
+        },
+        { role: 'user', content: extractionPrompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.2, // Lower temperature for more consistent extraction
+    });
+
+    const responseText = completion.choices[0]?.message?.content;
+    if (!responseText) {
+      logger.warn('AI extraction failed - no response from Groq');
+      return null;
+    }
+
+    const extracted = JSON.parse(responseText);
+    
+    // Validate that we got at least a title
+    if (!extracted.title || typeof extracted.title !== 'string' || extracted.title.trim().length === 0) {
+      logger.warn('AI extraction failed - no title extracted', { extracted, message });
+      return null;
+    }
+
+    // Clean and validate extracted data
+    const cleaned = {
+      title: extracted.title.trim(),
+      description: extracted.description ? String(extracted.description).trim() : null,
+      priority: ['low', 'medium', 'high'].includes(extracted.priority?.toLowerCase()) 
+        ? extracted.priority.toLowerCase() 
+        : null,
+      date: extracted.date ? normalizeDate(String(extracted.date)) : null,
+      timeStart: extracted.timeStart || null,
+      timeEnd: extracted.timeEnd || null,
+    };
+
+    // Validate title length
+    if (cleaned.title.length > 100) {
+      cleaned.title = cleaned.title.substring(0, 100).trim();
+    }
+
+    logger.info('AI extraction successful', { cleaned, originalMessage: message });
+    return cleaned;
+  } catch (error) {
+    logger.error('AI extraction error:', error);
+    return null;
+  }
+};
+
+/**
+ * Normalize relative date strings to YYYY-MM-DD format
+ * Handles: today, tomorrow, next week, next month, day names, etc.
+ * @param {string} dateValue - Date string (relative or absolute)
+ * @returns {string|null} Normalized date in YYYY-MM-DD format or null
+ */
+const normalizeDate = (dateValue) => {
+  if (!dateValue || typeof dateValue !== 'string') {
     return null;
   }
 
-  const trimmedMessage = message.trim();
-  const lowerMessage = trimmedMessage.toLowerCase();
-  
-  // Common task creation phrases to look for
-  const taskPhrases = [
-    'create a task',
-    'create task',
-    'add a task',
-    'add task',
-    'new task',
-    'make a task',
-    'make task',
-    'set a task',
-    'set task',
-    'add a todo',
-    'add todo',
-    'create a todo',
-    'new todo',
-    'remind me to',
-    'remind me',
-    'i need to',
-    'i have to',
-    'i should',
-    'i must',
-    'schedule',
-    'plan to',
-  ];
+  const lowerDate = dateValue.toLowerCase().trim();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
 
-  // Check if message contains task creation phrases
-  let hasTaskPhrase = false;
-  let taskPhraseIndex = -1;
-  let taskPhrase = '';
-
-  for (const phrase of taskPhrases) {
-    const index = lowerMessage.indexOf(phrase);
-    if (index !== -1) {
-      hasTaskPhrase = true;
-      taskPhraseIndex = index;
-      taskPhrase = phrase;
-      break;
-    }
+  // Handle relative dates
+  if (lowerDate === 'today') {
+    return now.toISOString().split('T')[0];
   }
 
-  // Pattern 1: Extract after task creation phrases
-  if (hasTaskPhrase) {
-    const afterPhrase = trimmedMessage.substring(taskPhraseIndex + taskPhrase.length).trim();
-    
-    // Remove leading words like "for", "to", "about", "on", "with"
-    const cleaned = afterPhrase.replace(/^(?:for|to|about|on|with|that|which)\s+/i, '').trim();
-    
-    if (cleaned.length > 0) {
-      let title = cleaned;
-      
-      // Remove trailing date/time references
-      title = title.replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '');
-      
-      // Remove trailing priority references
-      title = title.replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '');
-      
-      // Remove trailing time references
-      title = title.replace(/\s+at\s+\d{1,2}:\d{2}.*$/i, '');
-      
-      // Clean up common trailing phrases
-      title = title.replace(/\s+(?:please|thanks|thank you).*$/i, '');
-      
-      title = title.trim();
-      
-      if (title.length > 0 && title.length <= 100) {
-        return title;
-      }
-    }
+  if (lowerDate === 'tomorrow') {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
   }
 
-  // Pattern 2: Extract after common separators (dash, colon, etc.)
-  const separators = [
-    { pattern: /\s*-\s+/, name: 'dash' },
-    { pattern: /\s*:\s*/, name: 'colon' },
-    { pattern: /\s+for\s+/, name: 'for' },
-    { pattern: /\s+to\s+/, name: 'to' },
-    { pattern: /\s+about\s+/, name: 'about' },
-  ];
-
-  for (const sep of separators) {
-    const match = trimmedMessage.match(sep.pattern);
-    if (match && match.index !== undefined && match.index > 0) {
-      const afterSep = trimmedMessage.substring(match.index + match[0].length).trim();
-      
-      // Skip if it's just a date/time
-      if (!/^(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)/i.test(afterSep)) {
-        let title = afterSep;
-        
-        // Remove trailing date/time references
-        title = title.replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '');
-        
-        // Remove trailing priority references
-        title = title.replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '');
-        
-        title = title.trim();
-        
-        if (title.length > 0 && title.length <= 100) {
-          return title;
-        }
-      }
-    }
+  if (lowerDate === 'yesterday') {
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return yesterday.toISOString().split('T')[0];
   }
 
-  // Pattern 3: If message is short and doesn't contain task phrases, use the whole message
-  // (user might have just said "code clean up" expecting context)
-  if (trimmedMessage.length <= 100 && !hasTaskPhrase && trimmedMessage.split(/\s+/).length <= 10) {
-    // Remove date/time/priority references
-    let title = trimmedMessage
-      .replace(/\s+(?:for|on|at|by)\s+(?:tomorrow|today|next\s+week|next\s+month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}).*$/i, '')
-      .replace(/\s+(?:with\s+)?(?:high|medium|low|urgent)\s+priority.*$/i, '')
-      .trim();
+  // Handle "next week", "next month"
+  if (lowerDate.includes('next week')) {
+    const nextWeek = new Date(now);
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    return nextWeek.toISOString().split('T')[0];
+  }
+
+  if (lowerDate.includes('next month')) {
+    const nextMonth = new Date(now);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    return nextMonth.toISOString().split('T')[0];
+  }
+
+  // Handle day names (Monday, Tuesday, etc.)
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const dayIndex = dayNames.findIndex(day => lowerDate.includes(day));
+  if (dayIndex !== -1) {
+    const targetDay = new Date(now);
+    const currentDay = now.getDay();
+    let daysToAdd = dayIndex - currentDay;
     
-    if (title.length > 0) {
-      return title;
+    // If the day has passed this week, get next week's occurrence
+    if (daysToAdd <= 0) {
+      daysToAdd += 7;
     }
+    
+    targetDay.setDate(targetDay.getDate() + daysToAdd);
+    return targetDay.toISOString().split('T')[0];
+  }
+
+  // Try parsing as absolute date
+  try {
+    const parsedDate = new Date(dateValue);
+    if (!isNaN(parsedDate.getTime())) {
+      return parsedDate.toISOString().split('T')[0];
+    }
+  } catch (e) {
+    // Continue to return null
+  }
+
+  // If it's already in YYYY-MM-DD format, return as is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return dateValue;
   }
 
   return null;
@@ -246,13 +286,27 @@ const validateTaskData = (taskData) => {
     validated.priority = priority;
   }
 
-  // Date validation
+  // Date validation and normalization
   if (taskData.date) {
-    const date = new Date(taskData.date);
-    if (isNaN(date.getTime())) {
-      throw new Error('Invalid date format');
+    // First try to normalize relative dates
+    const normalizedDate = normalizeDate(String(taskData.date));
+    
+    if (normalizedDate) {
+      validated.date = normalizedDate;
+    } else {
+      // If normalization fails, try parsing as absolute date
+      const date = new Date(taskData.date);
+      if (isNaN(date.getTime())) {
+        logger.warn('Date normalization failed, using default date', {
+          originalDate: taskData.date,
+          taskData,
+        });
+        // Don't throw error, just use today's date as fallback
+        validated.date = new Date().toISOString().split('T')[0];
+      } else {
+        validated.date = date.toISOString().split('T')[0];
+      }
     }
-    validated.date = date.toISOString().split('T')[0];
   }
 
   // Optional fields
@@ -386,20 +440,25 @@ export const ask = async (userId, message) => {
           payload.task = {};
         }
 
-        // If title is missing, try fallback extraction
+        // If title is missing, try AI-powered fallback extraction
         if (!payload.task.title || (typeof payload.task.title === 'string' && payload.task.title.trim().length === 0)) {
-          logger.warn('AI failed to extract task title, attempting fallback extraction', {
+          logger.warn('AI failed to extract task title, attempting AI-powered fallback extraction', {
             originalMessage: message,
             taskObject: payload.task,
           });
           
-          const fallbackTitle = extractTitleFallback(message);
-          if (fallbackTitle) {
-            logger.info('Fallback title extraction successful', {
-              extractedTitle: fallbackTitle,
+          const extractedDetails = await extractTaskDetailsWithAI(message);
+          if (extractedDetails && extractedDetails.title) {
+            logger.info('AI fallback extraction successful', {
+              extractedDetails,
               originalMessage: message,
             });
-            payload.task.title = fallbackTitle;
+            // Merge extracted details into payload.task, prioritizing extracted values
+            payload.task = {
+              ...extractedDetails,
+              ...payload.task, // Keep any existing fields from initial parsing
+              title: extractedDetails.title, // Ensure title is set
+            };
           } else {
             logger.error('Create task failed - missing title (AI and fallback both failed):', {
               payload,
@@ -407,6 +466,19 @@ export const ask = async (userId, message) => {
               taskObject: payload.task,
             });
             throw new Error('Task title is required to create a task. Please specify what task you want to create.');
+          }
+        }
+
+        // Normalize date before validation (handle relative dates like "today", "tomorrow")
+        if (payload.task.date) {
+          const normalizedDate = normalizeDate(String(payload.task.date));
+          if (normalizedDate) {
+            payload.task.date = normalizedDate;
+          } else {
+            logger.warn('Date normalization failed, will use default date', {
+              originalDate: payload.task.date,
+              task: payload.task,
+            });
           }
         }
 
