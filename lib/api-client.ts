@@ -259,7 +259,7 @@ class ApiClient {
 
   // AI methods
   async aiChat(message: string) {
-    return this.request<{ response: string }>('/api/ai/chat', {
+    return this.request<{ response: string }>('/api/ai/ask', {
       method: 'POST',
       body: JSON.stringify({ message }),
     });
