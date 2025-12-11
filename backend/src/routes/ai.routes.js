@@ -9,6 +9,7 @@ router.use(authenticate);
 
 // AI routes
 router.post('/chat', aiController.chat);
+router.post('/ask', aiController.ask);
 
 export default router;
 
