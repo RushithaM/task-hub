@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Plus, Sparkles, User, X, Send, LogOut, Edit,
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -81,6 +82,9 @@ export default function CalendarPage() {
   const [taskReferenceLinks, setTaskReferenceLinks] = useState("");
   const [timeRangeError, setTimeRangeError] = useState("");
   const navRef = useRef<HTMLDivElement>(null);
+  const aiMessagesEndRef = useRef<HTMLDivElement>(null);
+  const aiMessagesContainerRef = useRef<HTMLDivElement>(null);
+  const aiTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [navHeight, setNavHeight] = useState(73);
   const [tasksData, setTasksData] = useState<Record<number, Task[]>>({});
   const [loading, setLoading] = useState(true);
@@ -103,6 +107,19 @@ export default function CalendarPage() {
       setNavHeight(navRef.current.offsetHeight);
     }
   }, []);
+
+  // Auto-scroll to bottom when AI messages update
+  useEffect(() => {
+    const scrollToBottom = () => {
+      if (aiMessagesEndRef.current) {
+        aiMessagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    };
+
+    // Small delay to ensure DOM is updated
+    const timeoutId = setTimeout(scrollToBottom, 100);
+    return () => clearTimeout(timeoutId);
+  }, [aiMessages, aiLoading]);
 
   // Sync profile form fields when user data changes
   useEffect(() => {
@@ -611,6 +628,9 @@ export default function CalendarPage() {
 
     const userMessage = aiMessage.trim();
     setAiMessage("");
+    if (aiTextareaRef.current) {
+      aiTextareaRef.current.style.height = 'auto';
+    }
     setAiMessages(prev => [...prev, { role: 'user', message: userMessage }]);
     setAiLoading(true);
 
@@ -1211,13 +1231,16 @@ export default function CalendarPage() {
                 
                 {/* Time Range Selector - Microsoft Teams Style */}
                 <div className={`rounded-xl border-2 p-4 transition-all ${
-                  timeRangeError ? "border-destructive bg-destructive/5" : "border-border bg-background"
+                  timeRangeError ? "border-destructive bg-destructive/5" : "border-border bg-muted/30"
                 }`}>
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="flex flex-col gap-6">
                     {/* Start Time */}
-                    <div className="flex-1 w-full sm:w-auto min-w-0">
-                      <Label className="text-xs font-medium text-muted-foreground mb-2 block">Start Time</Label>
-                      <div className="flex items-center gap-1.5">
+                    <div className="w-full flex items-start gap-4">
+                      <div className="flex-shrink-0">
+                        <Label className="text-sm font-bold text-foreground block">Start Time</Label>
+                        <Label className="text-xs font-normal text-muted-foreground block mt-0.5">Task begins</Label>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-1 justify-end">
                         <Select
                           value={(() => {
                             if (!taskTimeStart) return "";
@@ -1232,7 +1255,7 @@ export default function CalendarPage() {
                             handleTimeStartChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-12 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue placeholder="H" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1258,7 +1281,7 @@ export default function CalendarPage() {
                             handleTimeStartChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-12 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue placeholder="M" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1283,7 +1306,7 @@ export default function CalendarPage() {
                             handleTimeStartChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-16 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1295,9 +1318,12 @@ export default function CalendarPage() {
                     </div>
 
                     {/* End Time */}
-                    <div className="flex-1 w-full sm:w-auto min-w-0">
-                      <Label className="text-xs font-medium text-muted-foreground mb-2 block">End Time</Label>
-                      <div className="flex items-center gap-1.5">
+                    <div className="w-full flex items-start gap-4">
+                      <div className="flex-shrink-0">
+                        <Label className="text-sm font-bold text-foreground block">End Time</Label>
+                        <Label className="text-xs font-normal text-muted-foreground block mt-0.5">Task ends</Label>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-1 justify-end">
                         <Select
                           value={(() => {
                             if (!taskTimeEnd) return "";
@@ -1312,7 +1338,7 @@ export default function CalendarPage() {
                             handleTimeEndChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-12 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue placeholder="H" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1338,7 +1364,7 @@ export default function CalendarPage() {
                             handleTimeEndChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-12 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue placeholder="M" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1363,7 +1389,7 @@ export default function CalendarPage() {
                             handleTimeEndChange(newTime);
                           }}
                         >
-                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                          <SelectTrigger className="rounded-lg h-12 w-16 border-2 bg-muted/50 [&_svg]:hidden">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1649,7 +1675,7 @@ export default function CalendarPage() {
               </div>
 
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto px-6 py-6">
+              <div ref={aiMessagesContainerRef} className="flex-1 overflow-y-auto px-6 py-6">
                 <div className="space-y-4">
                   {aiMessages.map((msg, index) => (
                     <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
@@ -1663,7 +1689,29 @@ export default function CalendarPage() {
                           ? 'bg-primary/10 rounded-tr-none' 
                           : 'bg-muted/50 rounded-tl-none'
                       }`}>
-                        <p className="text-sm text-foreground">{msg.message}</p>
+                        {msg.role === 'ai' ? (
+                          <div className="text-sm text-foreground">
+                            <ReactMarkdown
+                              components={{
+                                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                                strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                                em: ({ children }) => <em className="italic">{children}</em>,
+                                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1.5 ml-1">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1.5 ml-1">{children}</ol>,
+                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                                h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-2 first:mt-0">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-2 first:mt-0">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                                code: ({ children }) => <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                                blockquote: ({ children }) => <blockquote className="border-l-2 border-border pl-3 italic my-2">{children}</blockquote>,
+                              }}
+                            >
+                              {msg.message}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-foreground">{msg.message}</p>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1677,28 +1725,44 @@ export default function CalendarPage() {
                       </div>
                     </div>
                   )}
+                  <div ref={aiMessagesEndRef} />
                 </div>
               </div>
 
               {/* Input Area */}
               <div className="border-t border-border p-4">
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="text"
+                <div className="flex items-end gap-2">
+                  <Textarea
+                    ref={aiTextareaRef}
                     placeholder="Ask me anything..."
                     value={aiMessage}
-                    onChange={(e) => setAiMessage(e.target.value)}
-                    onKeyDown={async (e) => {
-                      if (e.key === "Enter" && aiMessage.trim() && !aiLoading) {
-                        await handleSendAIMessage();
+                    onChange={(e) => {
+                      setAiMessage(e.target.value);
+                      // Auto-resize textarea
+                      if (aiTextareaRef.current) {
+                        aiTextareaRef.current.style.height = 'auto';
+                        aiTextareaRef.current.style.height = `${Math.min(aiTextareaRef.current.scrollHeight, 128)}px`;
                       }
                     }}
-                    className="rounded-xl"
+                    onKeyDown={async (e) => {
+                      // Enter alone submits the message
+                      if (e.key === "Enter" && !e.shiftKey && aiMessage.trim() && !aiLoading) {
+                        e.preventDefault();
+                        await handleSendAIMessage();
+                        // Reset textarea height after sending
+                        if (aiTextareaRef.current) {
+                          aiTextareaRef.current.style.height = 'auto';
+                        }
+                      }
+                      // Shift+Enter creates a new line (default behavior, no need to prevent)
+                    }}
+                    className="rounded-xl min-h-[44px] max-h-32 resize-none overflow-y-auto"
                     disabled={aiLoading}
+                    rows={1}
                   />
                   <Button
                     size="icon"
-                    className="rounded-xl"
+                    className="rounded-xl shrink-0"
                     onClick={handleSendAIMessage}
                     disabled={aiLoading || !aiMessage.trim()}
                   >
@@ -1751,24 +1815,6 @@ export default function CalendarPage() {
                   <div className="text-center">
                     <h3 className="text-xl font-bold tracking-wide">{user?.name || "User"}</h3>
                   </div>
-
-                  {/* Task Statistics */}
-                  <Card className="rounded-xl border border-border bg-muted/30 p-4">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Total Tasks</span>
-                        <span className="text-sm font-semibold">0</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Completed</span>
-                        <span className="text-sm font-semibold">0</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Completion Rate</span>
-                        <span className="text-sm font-semibold">0%</span>
-                      </div>
-                    </div>
-                  </Card>
 
                   {/* Profile Information */}
                   <div className="space-y-4">

@@ -1,23 +1,36 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
 import {
   Sparkles,
   User,
   TrendingUp,
   AlertCircle,
-  Brain,
   CheckCircle2,
   BarChart3,
   Clock,
   Target,
   Zap,
   Activity,
+  X,
+  Send,
+  LogOut,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiClient } from "@/lib/api-client";
 
 export default function AnalyticsPage() {
@@ -30,6 +43,29 @@ export default function AnalyticsPage() {
   const [monthlyTrend, setMonthlyTrend] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [currentMonth] = useState(new Date());
+  const [isAIAssistOpen, setIsAIAssistOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'ai'; message: string }>>([
+    { role: 'ai', message: "Hello! I'm your AI Task Assistant. I can help you organize, prioritize, and manage your tasks efficiently. How can I help you today?" }
+  ]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileTitle, setProfileTitle] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const navRef = useRef<HTMLDivElement>(null);
+  const [navHeight, setNavHeight] = useState(73);
+  const aiMessagesEndRef = useRef<HTMLDivElement>(null);
+  const aiMessagesContainerRef = useRef<HTMLDivElement>(null);
+  const aiTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -80,6 +116,63 @@ export default function AnalyticsPage() {
 
     fetchData();
   }, [currentMonth, router]);
+
+  // Set nav height
+  useEffect(() => {
+    if (navRef.current) {
+      setNavHeight(navRef.current.offsetHeight);
+    }
+  }, [user]);
+
+  // Auto-scroll to bottom when AI messages update
+  useEffect(() => {
+    const scrollToBottom = () => {
+      if (aiMessagesEndRef.current) {
+        aiMessagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    };
+
+    // Small delay to ensure DOM is updated
+    const timeoutId = setTimeout(scrollToBottom, 100);
+    return () => clearTimeout(timeoutId);
+  }, [aiMessages, aiLoading]);
+
+  // Sync profile form fields when user data changes
+  useEffect(() => {
+    if (user && !isEditingProfile) {
+      setProfileName(user.name);
+      setProfileEmail(user.email);
+      setProfileTitle(user.title || "");
+    }
+  }, [user, isEditingProfile]);
+
+  const handleSendAIMessage = async () => {
+    if (!aiMessage.trim() || aiLoading) return;
+
+    const userMessage = aiMessage.trim();
+    setAiMessage("");
+    if (aiTextareaRef.current) {
+      aiTextareaRef.current.style.height = 'auto';
+    }
+    setAiMessages(prev => [...prev, { role: 'user', message: userMessage }]);
+    setAiLoading(true);
+
+    try {
+      const response = await apiClient.aiChat(userMessage);
+      if (response.success && response.data?.response) {
+        setAiMessages(prev => [...prev, { role: 'ai', message: response.data!.response }]);
+      }
+    } catch (error: any) {
+      console.error('AI chat error:', error);
+      setAiMessages(prev => [...prev, { 
+        role: 'ai', 
+        message: 'Sorry, I encountered an error. Please try again.' 
+      }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <div className="bg-gradient-to-br from-background via-[var(--gradient-via)] to-[var(--gradient-to)]">
       {/* Sticky Navigation Header */}
@@ -89,7 +182,7 @@ export default function AnalyticsPage() {
         transition={{ duration: 0.5 }}
         className="sticky top-0 z-50 border-b border-border/50 bg-card/90 backdrop-blur-xl shadow-sm"
       >
-        <div className="w-full px-6 py-4 relative">
+        <div ref={navRef} className="w-full px-6 py-4 relative">
           {/* Pattern Design - Fades to edges */}
           <div className="absolute inset-0 left-0 right-0 flex items-center justify-center pointer-events-none overflow-hidden">
             <div 
@@ -119,9 +212,20 @@ export default function AnalyticsPage() {
               >
                 Dashboard
               </Link>
-              <Sparkles className="h-5 w-5 stroke-[1.5] text-primary" />
-              <Link
-                href="/dashboard/profile"
+              <button
+                onClick={() => {
+                  setIsAIAssistOpen(true);
+                  setIsProfileOpen(false);
+                }}
+                className="cursor-pointer transition-opacity hover:opacity-70"
+              >
+                <Sparkles className="h-5 w-5 stroke-[1.5] text-primary" />
+              </button>
+              <button
+                onClick={() => {
+                  setIsProfileOpen(true);
+                  setIsAIAssistOpen(false);
+                }}
                 className="flex items-center gap-3 rounded-xl border border-border/50 bg-background/50 px-3 py-2 transition-colors hover:bg-accent/30"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 ring-2 ring-primary/20">
@@ -130,13 +234,22 @@ export default function AnalyticsPage() {
                 <div className="flex flex-col">
                   <p className="text-sm font-semibold leading-tight">{user?.name || "User"}</p>
                 </div>
-              </Link>
+              </button>
             </div>
           </div>
         </div>
       </motion.div>
 
-      <div className="mx-auto max-w-screen-xl px-6 pt-8 pb-8">
+      {/* Main Content Area - Adjusts when sidebars are open */}
+      <div className="flex">
+        <motion.div
+          animate={{
+            marginRight: isAIAssistOpen || isProfileOpen ? "24rem" : "0",
+          }}
+          transition={{ type: "spring", damping: 25, stiffness: 200 }}
+          className="w-full"
+        >
+          <div className="mx-auto max-w-screen-xl px-6 pt-8 pb-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -239,14 +352,14 @@ export default function AnalyticsPage() {
               <Card className="group h-full rounded-2xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-lg hover:border-primary/30">
                 <div className="mb-3 flex items-center gap-2">
                   <div className="inline-flex rounded-xl bg-primary/10 p-1.5">
-                    <Brain className="h-3.5 w-3.5 stroke-[1.5] text-primary" />
+                    <Clock className="h-3.5 w-3.5 stroke-[1.5] text-primary" />
                   </div>
-                  <p className="text-xs font-bold text-muted-foreground">AI Suggestions</p>
+                  <p className="text-xs font-bold text-muted-foreground">Pending Tasks</p>
                 </div>
                 <p className="text-center text-2xl font-bold tracking-tight">
-                  {loading ? "..." : (overview?.aiSuggestions || 0)}
+                  {loading ? "..." : (overview?.totalTasks ? (overview.totalTasks - (overview.completedTasks || 0)) : 0)}
                 </p>
-                <p className="mt-1 text-center text-xs text-muted-foreground">Tasks optimized</p>
+                <p className="mt-1 text-center text-xs text-muted-foreground">Awaiting completion</p>
               </Card>
             </motion.div>
           </div>
@@ -767,7 +880,424 @@ export default function AnalyticsPage() {
             </div>
           </div>
         </motion.div>
+          </div>
+        </motion.div>
       </div>
+
+      {/* AI Assist Sidebar - Fixed to right, starts below nav */}
+      <AnimatePresence>
+        {isAIAssistOpen && (
+          <motion.div
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed right-0 z-40 w-96 bg-card shadow-2xl border-l border-border"
+            style={{
+              top: `${navHeight}px`,
+              height: `calc(100vh - ${navHeight}px)`,
+            }}
+          >
+            <div className="flex h-full flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-border px-6 pt-5 pb-3">
+                <h2 className="text-base font-bold tracking-wide">AI Task Assist</h2>
+                <button
+                  onClick={() => setIsAIAssistOpen(false)}
+                  className="rounded-lg p-1.5 transition-colors hover:bg-accent"
+                >
+                  <X className="h-5 w-5 stroke-[1.5] text-muted-foreground" />
+                </button>
+              </div>
+
+              {/* Messages Area */}
+              <div ref={aiMessagesContainerRef} className="flex-1 overflow-y-auto px-6 py-6">
+                <div className="space-y-4">
+                  {aiMessages.map((msg, index) => (
+                    <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      {msg.role === 'ai' && (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                          <Sparkles className="h-4 w-4 stroke-[1.5] text-primary" />
+                        </div>
+                      )}
+                      <div className={`flex-1 rounded-xl p-4 ${
+                        msg.role === 'user' 
+                          ? 'bg-primary/10 rounded-tr-none' 
+                          : 'bg-muted/50 rounded-tl-none'
+                      }`}>
+                        {msg.role === 'ai' ? (
+                          <div className="text-sm text-foreground">
+                            <ReactMarkdown
+                              components={{
+                                p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                                strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                                em: ({ children }) => <em className="italic">{children}</em>,
+                                ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1.5 ml-1">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1.5 ml-1">{children}</ol>,
+                                li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                                h1: ({ children }) => <h1 className="text-base font-bold mb-2 mt-2 first:mt-0">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-sm font-bold mb-2 mt-2 first:mt-0">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                                code: ({ children }) => <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                                blockquote: ({ children }) => <blockquote className="border-l-2 border-border pl-3 italic my-2">{children}</blockquote>,
+                              }}
+                            >
+                              {msg.message}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-foreground">{msg.message}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {aiLoading && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Sparkles className="h-4 w-4 stroke-[1.5] text-primary" />
+                      </div>
+                      <div className="flex-1 rounded-xl rounded-tl-none bg-muted/50 p-4">
+                        <p className="text-sm text-muted-foreground">Thinking...</p>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={aiMessagesEndRef} />
+                </div>
+              </div>
+
+              {/* Input Area */}
+              <div className="border-t border-border p-4">
+                <div className="flex items-end gap-2">
+                  <Textarea
+                    ref={aiTextareaRef}
+                    placeholder="Ask me anything..."
+                    value={aiMessage}
+                    onChange={(e) => {
+                      setAiMessage(e.target.value);
+                      // Auto-resize textarea
+                      if (aiTextareaRef.current) {
+                        aiTextareaRef.current.style.height = 'auto';
+                        aiTextareaRef.current.style.height = `${Math.min(aiTextareaRef.current.scrollHeight, 128)}px`;
+                      }
+                    }}
+                    onKeyDown={async (e) => {
+                      // Enter alone submits the message
+                      if (e.key === "Enter" && !e.shiftKey && aiMessage.trim() && !aiLoading) {
+                        e.preventDefault();
+                        await handleSendAIMessage();
+                        // Reset textarea height after sending
+                        if (aiTextareaRef.current) {
+                          aiTextareaRef.current.style.height = 'auto';
+                        }
+                      }
+                      // Shift+Enter creates a new line (default behavior, no need to prevent)
+                    }}
+                    className="rounded-xl min-h-[44px] max-h-32 resize-none overflow-y-auto"
+                    disabled={aiLoading}
+                    rows={1}
+                  />
+                  <Button
+                    size="icon"
+                    className="rounded-xl shrink-0"
+                    onClick={handleSendAIMessage}
+                    disabled={aiLoading || !aiMessage.trim()}
+                  >
+                    <Send className="h-4 w-4 stroke-[1.5]" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Profile Sidebar - Fixed to right, starts below nav */}
+      <AnimatePresence>
+        {isProfileOpen && (
+          <motion.div
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="fixed right-0 z-40 w-96 bg-card shadow-2xl border-l border-border overflow-y-auto"
+            style={{
+              top: `${navHeight}px`,
+              height: `calc(100vh - ${navHeight}px)`,
+            }}
+          >
+            <div className="flex h-full flex-col">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-border px-6 pt-5 pb-3">
+                <h2 className="text-base font-bold tracking-wide">Profile</h2>
+                <button
+                  onClick={() => setIsProfileOpen(false)}
+                  className="rounded-lg p-1.5 transition-colors hover:bg-accent"
+                >
+                  <X className="h-5 w-5 stroke-[1.5] text-muted-foreground" />
+                </button>
+              </div>
+
+              {/* Profile Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-6">
+                <div className="space-y-6">
+                  {/* Avatar */}
+                  <div className="flex justify-center">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/20">
+                      <User className="h-10 w-10 stroke-[1.5] text-primary" />
+                    </div>
+                  </div>
+
+                  {/* Name */}
+                  <div className="text-center">
+                    <h3 className="text-xl font-bold tracking-wide">{user?.name || "User"}</h3>
+                  </div>
+
+                  {/* Profile Information */}
+                  <div className="space-y-4">
+                    <h4 className="text-base font-bold tracking-wide">Profile Information</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-name" className="text-sm">Name</Label>
+                        <Input
+                          id="profile-name"
+                          type="text"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          className="rounded-xl"
+                          disabled={!isEditingProfile}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-email" className="text-sm">Email</Label>
+                        <Input
+                          id="profile-email"
+                          type="email"
+                          value={profileEmail}
+                          onChange={(e) => setProfileEmail(e.target.value)}
+                          className="rounded-xl"
+                          disabled
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="space-y-3 pt-2">
+                    {isEditingProfile ? (
+                      <>
+                        <Button 
+                          className="w-full rounded-xl" 
+                          size="lg"
+                          onClick={async () => {
+                            try {
+                              setProfileLoading(true);
+                              const response = await apiClient.updateProfile({
+                                name: profileName,
+                              });
+                              if (response.success) {
+                                setUser({
+                                  ...user!,
+                                  name: profileName,
+                                });
+                                setIsEditingProfile(false);
+                              }
+                            } catch (error: any) {
+                              console.error('Failed to update profile:', error);
+                              alert(error.message || 'Failed to update profile');
+                            } finally {
+                              setProfileLoading(false);
+                            }
+                          }}
+                          disabled={profileLoading || !profileName.trim()}
+                        >
+                          {profileLoading ? "Saving..." : "Save Changes"}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          className="w-full rounded-xl" 
+                          size="lg"
+                          onClick={() => {
+                            setIsEditingProfile(false);
+                            setProfileName(user?.name || "");
+                            setProfileEmail(user?.email || "");
+                            setProfileTitle(user?.title || "");
+                          }}
+                          disabled={profileLoading}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button 
+                        className="w-full rounded-xl" 
+                        size="lg"
+                        onClick={() => {
+                          setIsEditingProfile(true);
+                          setProfileName(user?.name || "");
+                          setProfileEmail(user?.email || "");
+                          setProfileTitle(user?.title || "");
+                        }}
+                      >
+                        Edit Profile
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      className="w-full rounded-xl" 
+                      size="lg"
+                      onClick={() => {
+                        setIsChangePasswordOpen(true);
+                        setOldPassword("");
+                        setNewPassword("");
+                        setConfirmPassword("");
+                        setPasswordError("");
+                      }}
+                    >
+                      Change Password
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      className="w-full rounded-xl"
+                      size="lg"
+                      onClick={async () => {
+                        try {
+                          await apiClient.logout();
+                        } catch (error) {
+                          console.error('Logout error:', error);
+                        }
+                        router.push("/signin");
+                      }}
+                    >
+                      <LogOut className="mr-2 h-4 w-4 stroke-[1.5]" />
+                      Log Out
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Change Password Dialog */}
+      <Dialog open={isChangePasswordOpen} onOpenChange={setIsChangePasswordOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Change Password</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="old-password" className="text-sm font-semibold">
+                Current Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="old-password"
+                type="password"
+                placeholder="Enter your current password"
+                value={oldPassword}
+                onChange={(e) => {
+                  setOldPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-password" className="text-sm font-semibold">
+                New Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="new-password"
+                type="password"
+                placeholder="Enter your new password"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password" className="text-sm font-semibold">
+                Confirm New Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="Confirm your new password"
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            {passwordError && (
+              <p className="text-sm text-destructive">{passwordError}</p>
+            )}
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1 rounded-xl"
+                onClick={() => {
+                  setIsChangePasswordOpen(false);
+                  setOldPassword("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                  setPasswordError("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 rounded-xl"
+                onClick={async () => {
+                  if (!oldPassword || !newPassword || !confirmPassword) {
+                    setPasswordError("All fields are required");
+                    return;
+                  }
+                  if (newPassword !== confirmPassword) {
+                    setPasswordError("New passwords do not match");
+                    return;
+                  }
+                  if (newPassword.length < 6) {
+                    setPasswordError("Password must be at least 6 characters");
+                    return;
+                  }
+                  try {
+                    setChangePasswordLoading(true);
+                    setPasswordError("");
+                    const response = await apiClient.changePassword({
+                      currentPassword: oldPassword,
+                      newPassword: newPassword,
+                    });
+                    if (response.success) {
+                      setIsChangePasswordOpen(false);
+                      setOldPassword("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                      setPasswordError("");
+                      alert("Password changed successfully!");
+                    } else {
+                      setPasswordError(response.message || "Failed to change password");
+                    }
+                  } catch (error: any) {
+                    console.error('Change password error:', error);
+                    setPasswordError(error.message || "Failed to change password");
+                  } finally {
+                    setChangePasswordLoading(false);
+                  }
+                }}
+                disabled={changePasswordLoading}
+              >
+                {changePasswordLoading ? "Changing..." : "Change Password"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
