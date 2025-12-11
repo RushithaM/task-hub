@@ -3,19 +3,43 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiClient } from "@/lib/api-client";
+import { AlertCircle } from "lucide-react";
 
 export default function SignInPage() {
   const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // Accept any credentials for now - will integrate API later
-    router.push("/dashboard/calendar");
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await apiClient.signin({ email, password });
+      if (response.success) {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+        if (token) {
+          router.push("/dashboard/calendar");
+        } else {
+          setError("Sign in successful but token not stored. Please try again.");
+        }
+      } else {
+        setError(response.message || "Sign in failed. Please check your credentials.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to sign in. Please check your credentials.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,6 +82,12 @@ export default function SignInPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{error}</span>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -65,6 +95,10 @@ export default function SignInPage() {
                   type="email"
                   placeholder="you@example.com"
                   className="rounded-xl"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -74,10 +108,14 @@ export default function SignInPage() {
                   type="password"
                   placeholder="••••••••"
                   className="rounded-xl"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  disabled={loading}
                 />
               </div>
-              <Button type="submit" className="w-full rounded-xl">
-                Sign In
+              <Button type="submit" className="w-full rounded-xl" disabled={loading}>
+                {loading ? "Signing in..." : "Sign In"}
               </Button>
             </form>
 

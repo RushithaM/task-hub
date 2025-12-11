@@ -30,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { apiClient } from "@/lib/api-client";
 
 interface Task {
   id: string;
@@ -63,6 +64,10 @@ export default function CalendarPage() {
   const [isAIAssistOpen, setIsAIAssistOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
+  const [aiMessages, setAiMessages] = useState<Array<{ role: 'user' | 'ai'; message: string }>>([
+    { role: 'ai', message: "Hello! I'm your AI Task Assistant. I can help you organize, prioritize, and manage your tasks efficiently. How can I help you today?" }
+  ]);
+  const [aiLoading, setAiLoading] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskFormDate, setTaskFormDate] = useState<number | null>(null);
   const [taskFormDateFull, setTaskFormDateFull] = useState<Date | undefined>(undefined);
@@ -74,109 +79,137 @@ export default function CalendarPage() {
   const [taskTimeEnd, setTaskTimeEnd] = useState("");
   const [taskTime, setTaskTime] = useState(""); // Keep for backward compatibility
   const [taskReferenceLinks, setTaskReferenceLinks] = useState("");
+  const [timeRangeError, setTimeRangeError] = useState("");
   const navRef = useRef<HTMLDivElement>(null);
   const [navHeight, setNavHeight] = useState(73);
-
-  // Initialize tasks state with sample data
-  const [tasksData, setTasksData] = useState<Record<number, Task[]>>({
-    1: [
-      { 
-        id: "1-1", 
-        title: "SEO Optimization", 
-        description: "Optimize website content for better search engine rankings. Focus on keyword research, meta tags, and content structure. Review current analytics and identify improvement opportunities.",
-        priority: "high" as const,
-        timeStart: "09:00 AM",
-        timeEnd: "10:00 AM",
-        referenceLinks: [
-          "https://moz.com/beginners-guide-to-seo",
-          "https://developers.google.com/search/docs"
-        ],
-        date: 1
-      },
-      { 
-        id: "1-2", 
-        title: "Client Meeting", 
-        description: "Quarterly review meeting with key stakeholders. Discuss project progress, budget updates, and upcoming milestones. Prepare presentation slides and status reports.",
-        priority: "high" as const,
-        timeStart: "11:00 AM",
-        timeEnd: "12:00 PM",
-        referenceLinks: [
-          "https://docs.google.com/presentation/d/example",
-          "https://drive.google.com/folder/status-reports"
-        ],
-        date: 1
-      },
-      { 
-        id: "1-3", 
-        title: "Design Review", 
-        description: "Review new UI/UX designs for the mobile app. Provide feedback on user flow, accessibility, and visual consistency.",
-        priority: "medium" as const,
-        timeStart: "02:00 PM",
-        timeEnd: "03:00 PM",
-        referenceLinks: [
-          "https://figma.com/design/mobile-app"
-        ],
-        date: 1
-      },
-    ],
-    5: [
-      { 
-        id: "5-1", 
-        title: "Team Meeting", 
-        description: "Weekly team sync to discuss blockers, share updates, and align on priorities for the sprint.",
-        priority: "medium" as const,
-        timeStart: "02:00 PM",
-        timeEnd: "03:00 PM",
-        referenceLinks: [],
-        date: 5
-      }
-    ],
-    10: [
-      { 
-        id: "10-1", 
-        title: "Code Review", 
-        description: "Review pull requests for the authentication module. Check for security best practices, code quality, and test coverage.",
-        priority: "high" as const,
-        timeStart: "11:00 AM",
-        timeEnd: "12:00 PM",
-        referenceLinks: [
-          "https://github.com/company/repo/pull/123"
-        ],
-        date: 10
-      },
-      { 
-        id: "10-2", 
-        title: "Standup", 
-        description: "Daily standup meeting with the development team.",
-        priority: "low" as const,
-        timeStart: "09:00 AM",
-        timeEnd: "09:30 AM",
-        referenceLinks: [],
-        date: 10
-      },
-    ],
-    15: [
-      { 
-        id: "15-1", 
-        title: "Sprint Planning", 
-        description: "Plan tasks and user stories for the upcoming sprint. Estimate effort, assign tickets, and set sprint goals. Review backlog and prioritize features.",
-        priority: "high" as const,
-        timeStart: "10:00 AM",
-        timeEnd: "12:00 PM",
-        referenceLinks: [
-          "https://jira.company.com/sprint/planning",
-          "https://confluence.company.com/sprint-goals"
-        ],
-        date: 15
-      }
-    ],
-  });
+  const [tasksData, setTasksData] = useState<Record<number, Task[]>>({});
+  const [loading, setLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [user, setUser] = useState<{ name: string; email: string; title: string | null } | null>(null);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileTitle, setProfileTitle] = useState("");
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
 
   useEffect(() => {
     if (navRef.current) {
       setNavHeight(navRef.current.offsetHeight);
     }
   }, []);
+
+  // Sync profile form fields when user data changes
+  useEffect(() => {
+    if (user && !isEditingProfile) {
+      setProfileName(user.name);
+      setProfileEmail(user.email);
+      setProfileTitle(user.title || "");
+    }
+  }, [user, isEditingProfile]);
+
+  // Fetch user profile and tasks on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        // Fetch user profile
+        const userResponse = await apiClient.getCurrentUser();
+        if (userResponse.success && userResponse.data) {
+          const userData = userResponse.data as { name: string; email: string; title?: string | null };
+          setUser({
+            name: userData.name,
+            email: userData.email,
+            title: userData.title || null,
+          });
+        }
+
+        // Fetch tasks for current month
+        await fetchTasksForMonth();
+      } catch (error: any) {
+        console.error('Failed to fetch user or tasks:', error);
+        // Check for 401 status or unauthorized message
+        if (error.status === 401 || error.message?.includes('Unauthorized') || error.message?.includes('token')) {
+          apiClient.setToken(null);
+          router.push('/signin');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // Fetch tasks when month changes
+  useEffect(() => {
+    fetchTasksForMonth();
+  }, [currentMonth]);
+
+  // Helper to convert API task format to calendar format
+  const convertApiTaskToCalendar = (apiTask: any): Task => {
+    // Parse date from YYYY-MM-DD format
+    const [year, month, day] = apiTask.date.split('-').map(Number);
+    const taskDate = new Date(year, month - 1, day);
+    
+    // Check if task is in the current month being viewed
+    const isInCurrentMonth = 
+      taskDate.getMonth() === currentMonth.getMonth() &&
+      taskDate.getFullYear() === currentMonth.getFullYear();
+    
+    return {
+      id: apiTask.id,
+      title: apiTask.title,
+      description: apiTask.description,
+      priority: apiTask.priority || "medium",
+      timeStart: apiTask.timeStart,
+      timeEnd: apiTask.timeEnd,
+      time: apiTask.time,
+      referenceLinks: apiTask.referenceLinks || [],
+      date: isInCurrentMonth ? taskDate.getDate() : 0, // Only show tasks for current month
+      completed: apiTask.completed || false,
+    };
+  };
+
+  // Fetch tasks for the current month
+  const fetchTasksForMonth = async () => {
+    try {
+      setTasksLoading(true);
+      const monthStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+      const response = await apiClient.getTasks({ month: monthStr });
+      
+      if (response.success && response.data?.tasks) {
+        // Group tasks by day
+        const grouped: Record<number, Task[]> = {};
+        response.data.tasks.forEach((apiTask: any) => {
+          const task = convertApiTaskToCalendar(apiTask);
+          const day = task.date;
+          // Only add tasks that are in the current month (date > 0)
+          if (day > 0) {
+            if (!grouped[day]) {
+              grouped[day] = [];
+            }
+            grouped[day].push(task);
+          }
+        });
+        setTasksData(grouped);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch tasks:', error);
+      // Check for 401 status or unauthorized message
+      if (error.status === 401 || error.message?.includes('Unauthorized') || error.message?.includes('token')) {
+        apiClient.setToken(null);
+        router.push('/signin');
+      }
+    } finally {
+      setTasksLoading(false);
+    }
+  };
 
   const today = new Date();
   const isToday = (date: number) => {
@@ -209,40 +242,123 @@ export default function CalendarPage() {
     return "No time specified";
   };
 
+  // Helper function to convert 12-hour time to minutes for comparison
+  const timeToMinutes = (timeStr: string): number => {
+    if (!timeStr) return 0;
+    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (!match) return 0;
+    let hours = parseInt(match[1]);
+    const minutes = parseInt(match[2]);
+    const period = match[3].toUpperCase();
+    
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    
+    return hours * 60 + minutes;
+  };
+
+  // Validate time range
+  const validateTimeRange = (start: string, end: string): boolean => {
+    if (!start || !end) return true; // Allow empty, will be validated on save
+    
+    const startMinutes = timeToMinutes(start);
+    const endMinutes = timeToMinutes(end);
+    
+    if (endMinutes <= startMinutes) {
+      setTimeRangeError("End time must be after start time");
+      return false;
+    }
+    
+    setTimeRangeError("");
+    return true;
+  };
+
+  // Handle time start change
+  const handleTimeStartChange = (value: string) => {
+    setTaskTimeStart(value);
+    if (taskTimeEnd) {
+      validateTimeRange(value, taskTimeEnd);
+    }
+  };
+
+  // Handle time end change
+  const handleTimeEndChange = (value: string) => {
+    setTaskTimeEnd(value);
+    if (taskTimeStart) {
+      validateTimeRange(taskTimeStart, value);
+    }
+  };
+
   // Helper function to get priority-based color classes
   const getPriorityColors = (priority?: "low" | "medium" | "high") => {
     switch (priority) {
       case "high":
         return {
-          border: "border-destructive/60",
-          bg: "bg-destructive/20",
-          hoverBorder: "hover:border-destructive",
-          hoverBg: "hover:bg-destructive/30",
-          text: "text-destructive",
+          border: "border-red-500/60",
+          sideBorder: "border-l-4 border-l-red-500",
+          bg: "bg-primary/15", // Keep lavender background
+          hoverBorder: "hover:border-red-500",
+          hoverBg: "hover:bg-primary/20",
+          text: "text-red-600",
         };
       case "medium":
         return {
-          border: "border-warning/60",
-          bg: "bg-warning/20",
-          hoverBorder: "hover:border-warning",
-          hoverBg: "hover:bg-warning/30",
-          text: "text-warning",
+          border: "border-yellow-500/60",
+          sideBorder: "border-l-4 border-l-yellow-500",
+          bg: "bg-primary/15", // Keep lavender background
+          hoverBorder: "hover:border-yellow-500",
+          hoverBg: "hover:bg-primary/20",
+          text: "text-yellow-600",
         };
       case "low":
         return {
-          border: "border-primary/40",
-          bg: "bg-primary/15",
-          hoverBorder: "hover:border-primary/60",
+          border: "border-green-500/60",
+          sideBorder: "border-l-4 border-l-green-500",
+          bg: "bg-primary/15", // Keep lavender background
+          hoverBorder: "hover:border-green-500",
           hoverBg: "hover:bg-primary/20",
-          text: "text-primary",
+          text: "text-green-600",
         };
       default:
         return {
           border: "border-muted-foreground/40",
-          bg: "bg-muted/15",
+          sideBorder: "",
+          bg: "bg-primary/15",
           hoverBorder: "hover:border-muted-foreground/60",
-          hoverBg: "hover:bg-muted/20",
+          hoverBg: "hover:bg-primary/20",
           text: "text-muted-foreground",
+        };
+    }
+  };
+
+  // Helper function to get task capsule styling based on priority only
+  const getTaskCapsuleStyle = (task: Task, date: number) => {
+    // Standardized 3 colors based on priority only - lighter shades
+    switch (task.priority) {
+      case "high":
+        return {
+          bg: "#FFE0E0",
+          text: "text-gray-800",
+          hoverBg: "#FFD0D0",
+        };
+      case "medium":
+        return {
+          bg: "#FFF4E0",
+          text: "text-gray-800",
+          hoverBg: "#FFEED0",
+        };
+      case "low":
+        return {
+          bg: "#E8FCE8",
+          text: "text-gray-800",
+          hoverBg: "#D8F8D8",
+        };
+      default:
+        // Default to medium priority color if no priority is set
+        return {
+          bg: "#FFF4E0",
+          text: "text-gray-800",
+          hoverBg: "#FFEED0",
         };
     }
   };
@@ -381,20 +497,20 @@ export default function CalendarPage() {
     setIsTaskFormOpen(true);
   };
 
-  const handleSaveTask = () => {
+  const handleSaveTask = async () => {
     if (!taskTitle.trim() || !taskFormDateFull) return;
     // Require at least timeStart or timeEnd, or legacy time
     if (!taskTimeStart.trim() && !taskTimeEnd.trim() && !taskTime.trim()) return;
-
-    // Extract date number from full date
-    const dateNum = taskFormDateFull.getDate();
-    const dateMonth = taskFormDateFull.getMonth();
-    const dateYear = taskFormDateFull.getFullYear();
     
-    // Use the date number - tasks are stored by day number in the current month view
-    // If the date is in a different month, we still use the day number
-    // The calendar view will need to handle cross-month tasks differently if needed
-    const finalDate = dateNum;
+    // Validate time range if both times are provided
+    if (taskTimeStart.trim() && taskTimeEnd.trim()) {
+      if (!validateTimeRange(taskTimeStart, taskTimeEnd)) {
+        return; // Don't save if validation fails
+      }
+    }
+
+    // Format date as YYYY-MM-DD
+    const dateStr = `${taskFormDateFull.getFullYear()}-${String(taskFormDateFull.getMonth() + 1).padStart(2, '0')}-${String(taskFormDateFull.getDate()).padStart(2, '0')}`;
 
     // Parse reference links (one per line)
     const referenceLinks = taskReferenceLinks
@@ -410,88 +526,108 @@ export default function CalendarPage() {
       timeString = taskTime.trim();
     }
 
-    const newTask: Task = {
-      id: editingTask?.id || `${finalDate}-${Date.now()}`,
-      title: taskTitle.trim(),
-      description: taskDescription.trim() || undefined,
-      priority: taskPriority,
-      timeStart: taskTimeStart.trim() || undefined,
-      timeEnd: taskTimeEnd.trim() || undefined,
-      time: timeString || undefined,
-      referenceLinks: referenceLinks.length > 0 ? referenceLinks : undefined,
-      date: finalDate,
-    };
-
-    setTasksData((prev) => {
-      const dayTasks = prev[finalDate] || [];
+    try {
       if (editingTask) {
-        // Update existing task - need to handle date change
-        const oldDate = editingTask.date || finalDate;
-        if (oldDate !== finalDate) {
-          // Date changed - remove from old date, add to new date
-          const oldDayTasks = prev[oldDate] || [];
-          const updatedOldTasks = oldDayTasks.filter((t) => t.id !== editingTask.id);
-          return {
-            ...prev,
-            [oldDate]: updatedOldTasks.length > 0 ? updatedOldTasks : undefined,
-            [finalDate]: [...(prev[finalDate] || []), newTask],
-          };
-        } else {
-          // Same date - just update
-          return {
-            ...prev,
-            [finalDate]: dayTasks.map((t) => (t.id === editingTask.id ? newTask : t)),
-          };
-        }
+        // Update existing task
+        await apiClient.updateTask(editingTask.id, {
+          title: taskTitle.trim(),
+          description: taskDescription.trim() || undefined,
+          priority: taskPriority,
+          date: dateStr,
+          timeStart: taskTimeStart.trim() || undefined,
+          timeEnd: taskTimeEnd.trim() || undefined,
+          time: timeString || undefined,
+          referenceLinks: referenceLinks.length > 0 ? referenceLinks : undefined,
+        });
       } else {
-        // Add new task
-        return {
-          ...prev,
-          [finalDate]: [...dayTasks, newTask],
-        };
+        // Create new task
+        await apiClient.createTask({
+          title: taskTitle.trim(),
+          description: taskDescription.trim() || undefined,
+          priority: taskPriority,
+          date: dateStr,
+          timeStart: taskTimeStart.trim() || undefined,
+          timeEnd: taskTimeEnd.trim() || undefined,
+          time: timeString || undefined,
+          referenceLinks: referenceLinks.length > 0 ? referenceLinks : undefined,
+        });
       }
-    });
 
-    setIsTaskFormOpen(false);
-    setTaskTitle("");
-    setTaskDescription("");
-    setTaskPriority("medium");
-    setTaskTimeStart("");
-    setTaskTimeEnd("");
-    setTaskTime("");
-    setTaskReferenceLinks("");
-    setTaskFormDate(null);
-    setTaskFormDateFull(undefined);
-    setEditingTask(null);
-    setIsDatePickerOpen(false);
+      // Refresh tasks
+      await fetchTasksForMonth();
+
+      setIsTaskFormOpen(false);
+      setTaskTitle("");
+      setTaskDescription("");
+      setTaskPriority("medium");
+      setTaskTimeStart("");
+      setTaskTimeEnd("");
+      setTaskTime("");
+      setTaskReferenceLinks("");
+      setTaskFormDate(null);
+      setTaskFormDateFull(undefined);
+      setEditingTask(null);
+      setIsDatePickerOpen(false);
+    } catch (error: any) {
+      console.error('Failed to save task:', error);
+      if (error.message?.includes('Unauthorized') || error.message?.includes('token')) {
+        router.push('/signin');
+      }
+    }
   };
 
-  const handleDeleteTask = (taskId: string, date: number) => {
-    setTasksData((prev) => {
-      const dayTasks = prev[date] || [];
-      const updatedTasks = dayTasks.filter((t) => t.id !== taskId);
-      if (updatedTasks.length === 0) {
-        const { [date]: _, ...rest } = prev;
-        return rest;
+  const handleDeleteTask = async (taskId: string, date: number) => {
+    try {
+      await apiClient.deleteTask(taskId);
+      // Refresh tasks
+      await fetchTasksForMonth();
+    } catch (error: any) {
+      console.error('Failed to delete task:', error);
+      if (error.message?.includes('Unauthorized') || error.message?.includes('token')) {
+        router.push('/signin');
       }
-      return {
-        ...prev,
-        [date]: updatedTasks,
-      };
-    });
+    }
   };
 
-  const handleToggleTaskCompletion = (taskId: string, date: number) => {
-    setTasksData((prev) => {
-      const dayTasks = prev[date] || [];
-      const updatedTasks = dayTasks.map((t) =>
-        t.id === taskId ? { ...t, completed: !t.completed } : t
-      );
-      return {
-        ...prev,
-        [date]: updatedTasks,
-      };
-    });
+  const handleToggleTaskCompletion = async (taskId: string, date: number) => {
+    try {
+      await apiClient.toggleTaskCompletion(taskId);
+      // Refresh tasks
+      await fetchTasksForMonth();
+      // Update quick view if open
+      if (quickViewTask && quickViewTask.id === taskId) {
+        setQuickViewTask({ ...quickViewTask, completed: !quickViewTask.completed });
+      }
+    } catch (error: any) {
+      console.error('Failed to toggle task completion:', error);
+      if (error.message?.includes('Unauthorized') || error.message?.includes('token')) {
+        router.push('/signin');
+      }
+    }
+  };
+
+  const handleSendAIMessage = async () => {
+    if (!aiMessage.trim() || aiLoading) return;
+
+    const userMessage = aiMessage.trim();
+    setAiMessage("");
+    setAiMessages(prev => [...prev, { role: 'user', message: userMessage }]);
+    setAiLoading(true);
+
+    try {
+      const response = await apiClient.aiChat(userMessage);
+      if (response.success && response.data?.response) {
+        setAiMessages(prev => [...prev, { role: 'ai', message: response.data.response }]);
+      }
+    } catch (error: any) {
+      console.error('AI chat error:', error);
+      setAiMessages(prev => [...prev, { 
+        role: 'ai', 
+        message: 'Sorry, I encountered an error. Please try again.' 
+      }]);
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const daysOfWeek = ["MON", "TUES", "WED", "THU", "FRI", "SAT", "SUN"];
@@ -556,10 +692,9 @@ export default function CalendarPage() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 ring-2 ring-primary/20">
                   <User className="h-4 w-4 stroke-[1.5] text-primary" />
                 </div>
-                <div className="flex flex-col">
-                  <p className="text-sm font-semibold leading-tight">John doe</p>
-                  <p className="text-xs text-muted-foreground leading-tight">Engineer</p>
-                </div>
+                  <div className="flex flex-col">
+                    <p className="text-sm font-semibold leading-tight">{user?.name || "User"}</p>
+                  </div>
               </button>
             </div>
           </div>
@@ -623,6 +758,16 @@ export default function CalendarPage() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="rounded-2xl border border-border bg-card p-6 shadow-lg"
         >
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <p className="text-muted-foreground">Loading...</p>
+            </div>
+          )}
+          {!loading && tasksLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-card/50 backdrop-blur-sm rounded-2xl z-10">
+              <p className="text-muted-foreground">Loading tasks...</p>
+            </div>
+          )}
           {/* Days of Week Header */}
           <div className="mb-4 grid grid-cols-7 gap-2">
             {daysOfWeek.map((day) => (
@@ -686,16 +831,25 @@ export default function CalendarPage() {
                 {day.month === "current" && day.tasks && day.tasks.length > 0 && (
                   <div className="flex flex-col space-y-1.5">
                     {day.tasks.slice(0, 2).map((task, taskIndex) => {
-                      const colors = getPriorityColors(task.priority);
+                      const capsuleStyle = getTaskCapsuleStyle(task, day.date);
                       return (
                         <motion.div
                           key={task.id}
                           initial={{ opacity: 0, y: 5 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: 0.4 + index * 0.01 + taskIndex * 0.05 }}
-                          className={`rounded-full border ${colors.border} ${colors.bg} px-2.5 py-1 shadow-sm transition-all ${colors.hoverBorder} ${colors.hoverBg} cursor-pointer flex items-center gap-2 ${
+                          className={`rounded-lg px-3 py-1.5 transition-all cursor-pointer ${
                             task.completed ? "opacity-60" : ""
                           }`}
+                          style={{
+                            backgroundColor: capsuleStyle.bg,
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = capsuleStyle.hoverBg;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = capsuleStyle.bg;
+                          }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setQuickViewTask(task);
@@ -703,32 +857,8 @@ export default function CalendarPage() {
                             setIsQuickViewOpen(true);
                           }}
                         >
-                          <motion.button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleTaskCompletion(task.id, day.date);
-                            }}
-                            whileHover={{ scale: 1.1 }}
-                            whileTap={{ scale: 0.95 }}
-                            className={`flex-shrink-0 rounded-full transition-all duration-200 flex items-center justify-center ${
-                              task.completed
-                                ? "bg-primary text-primary-foreground shadow-lg ring-2 ring-primary/30"
-                                : "bg-background/80 border-2 border-border text-muted-foreground hover:bg-primary/10 hover:border-primary/60 hover:text-primary"
-                            } h-5 w-5`}
-                          >
-                            {task.completed ? (
-                              <motion.div
-                                initial={{ scale: 0, rotate: -180 }}
-                                animate={{ scale: 1, rotate: 0 }}
-                                transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                              >
-                                <CheckCircle className="h-4 w-4 fill-current stroke-2 stroke-primary-foreground" />
-                              </motion.div>
-                            ) : (
-                              <Circle className="h-4 w-4 stroke-2" />
-                            )}
-                          </motion.button>
-                          <p className={`text-xs font-medium ${colors.text} flex-1 ${
+                          {/* Task Title */}
+                          <p className={`text-xs font-medium ${capsuleStyle.text} ${
                             task.completed ? "line-through" : ""
                           }`}>
                             {task.title}
@@ -769,11 +899,11 @@ export default function CalendarPage() {
             <div className="mt-4 space-y-2">
               {selectedDay?.tasks && selectedDay.tasks.length > 0 ? (
                 selectedDay.tasks.map((task) => {
-                  const colors = getPriorityColors(task.priority);
+                  const capsuleStyle = getTaskCapsuleStyle(task, selectedDay.date);
                   return (
                     <div
                       key={task.id}
-                      className={`flex items-center justify-between rounded-xl border-l-4 ${colors.border} border-t border-r border-b border-border/50 ${colors.bg} bg-card/50 p-3 transition-all ${colors.hoverBorder} hover:border-l-4 cursor-pointer`}
+                      className="flex items-center justify-between rounded-lg bg-background border border-border/50 p-3 transition-all cursor-pointer hover:bg-accent/30"
                       onClick={() => {
                         setQuickViewTask(task);
                         setQuickViewTaskDate(selectedDay.date);
@@ -782,7 +912,7 @@ export default function CalendarPage() {
                       }}
                     >
                       <div className="flex-1">
-                        <p className={`font-medium ${colors.text} ${
+                        <p className={`font-medium ${capsuleStyle.text} ${
                           task.completed ? "line-through opacity-60" : ""
                         }`}>{task.title}</p>
                         <p className={`text-sm text-muted-foreground ${
@@ -790,41 +920,15 @@ export default function CalendarPage() {
                         }`}>{formatTaskTime(task)}</p>
                         {task.priority && (
                           <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded-full font-medium ${
-                            task.priority === "high" ? "bg-destructive/20 text-destructive border border-destructive/30" :
-                            task.priority === "medium" ? "bg-warning/20 text-warning border border-warning/30" :
-                            "bg-primary/20 text-primary border border-primary/30"
+                            task.priority === "high" ? "bg-red-500/20 text-red-600 border border-red-500/30" :
+                            task.priority === "medium" ? "bg-yellow-500/20 text-yellow-600 border border-yellow-500/30" :
+                            "bg-green-500/20 text-green-600 border border-green-500/30"
                           } ${task.completed ? "opacity-60" : ""}`}>
                             {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
                           </span>
                         )}
                       </div>
                     <div className="flex items-center gap-2 ml-4" onClick={(e) => e.stopPropagation()}>
-                      <motion.button
-                        onClick={() => {
-                          if (selectedDay) {
-                            handleToggleTaskCompletion(task.id, selectedDay.date);
-                          }
-                        }}
-                        whileHover={{ scale: 1.1 }}
-                        whileTap={{ scale: 0.95 }}
-                        className={`rounded-full transition-all duration-200 flex items-center justify-center ${
-                          task.completed
-                            ? "bg-primary text-primary-foreground shadow-lg ring-2 ring-primary/30"
-                            : "bg-background/80 border-2 border-border text-muted-foreground hover:bg-primary/10 hover:border-primary/60 hover:text-primary"
-                        } h-6 w-6`}
-                      >
-                        {task.completed ? (
-                          <motion.div
-                            initial={{ scale: 0, rotate: -180 }}
-                            animate={{ scale: 1, rotate: 0 }}
-                            transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                          >
-                            <CheckCircle className="h-4 w-4 fill-current stroke-2 stroke-primary-foreground" />
-                          </motion.div>
-                        ) : (
-                          <Circle className="h-4 w-4 stroke-2" />
-                        )}
-                      </motion.button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -884,7 +988,7 @@ export default function CalendarPage() {
 
         {/* Task Form Dialog */}
         <Dialog open={isTaskFormOpen} onOpenChange={setIsTaskFormOpen}>
-          <DialogContent className="rounded-2xl max-w-2xl p-0 overflow-hidden border-2 border-border/50 shadow-2xl">
+          <DialogContent className="rounded-2xl max-w-4xl p-0 overflow-hidden border-2 border-border/50 shadow-2xl">
             {/* Header with gradient */}
             <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent px-6 pt-6 pb-4 border-b border-border/50">
               <DialogHeader>
@@ -925,7 +1029,7 @@ export default function CalendarPage() {
                 </DialogDescription>
               </DialogHeader>
             </div>
-            <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto overflow-x-hidden">
               {/* Task Title */}
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
@@ -948,14 +1052,6 @@ export default function CalendarPage() {
                   className="rounded-xl h-12 text-base border-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all"
                   maxLength={100}
                 />
-                <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">
-                    Be specific and concise
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {taskTitle.length}/100
-                  </p>
-                </div>
               </motion.div>
 
               {/* Description */}
@@ -979,14 +1075,6 @@ export default function CalendarPage() {
                   className="rounded-xl min-h-[120px] text-base resize-none border-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all"
                   maxLength={500}
                 />
-                <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground">
-                    Optional: Provide context and details for better task management
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {taskDescription.length}/500
-                  </p>
-                </div>
               </motion.div>
 
               {/* Date Field - Calendar Picker - Positioned in the middle */}
@@ -1049,10 +1137,6 @@ export default function CalendarPage() {
                     />
                   </PopoverContent>
                 </Popover>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  Past dates cannot be selected
-                </p>
               </motion.div>
 
               {/* Priority */}
@@ -1077,10 +1161,10 @@ export default function CalendarPage() {
                       className={`rounded-xl p-3 border-2 transition-all ${
                         taskPriority === priority
                           ? priority === "high"
-                            ? "border-destructive bg-destructive/10 shadow-md"
+                            ? "border-red-500 bg-red-500/10 shadow-md"
                             : priority === "medium"
-                            ? "border-warning bg-warning/10 shadow-md"
-                            : "border-primary bg-primary/10 shadow-md"
+                            ? "border-yellow-500 bg-yellow-500/10 shadow-md"
+                            : "border-green-500 bg-green-500/10 shadow-md"
                           : "border-border bg-background hover:border-primary/30 hover:bg-accent/30"
                       }`}
                     >
@@ -1088,19 +1172,19 @@ export default function CalendarPage() {
                         <div
                           className={`h-3 w-3 rounded-full ${
                             priority === "high"
-                              ? "bg-destructive"
+                              ? "bg-red-500"
                               : priority === "medium"
-                              ? "bg-warning"
-                              : "bg-primary"
+                              ? "bg-yellow-500"
+                              : "bg-green-500"
                           }`}
                         />
                         <span className={`text-xs font-semibold ${
                           taskPriority === priority
                             ? priority === "high"
-                              ? "text-destructive"
+                              ? "text-red-600"
                               : priority === "medium"
-                              ? "text-warning"
-                              : "text-primary"
+                              ? "text-yellow-600"
+                              : "text-green-600"
                             : "text-muted-foreground"
                         }`}>
                           {priority.charAt(0).toUpperCase() + priority.slice(1)}
@@ -1109,9 +1193,6 @@ export default function CalendarPage() {
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Set the importance level for this task
-                </p>
               </motion.div>
 
               {/* Time Range */}
@@ -1127,51 +1208,180 @@ export default function CalendarPage() {
                   </div>
                   Time Range <span className="text-destructive">*</span>
                 </Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label htmlFor="task-time-start" className="text-xs font-medium text-muted-foreground">Start Time</Label>
-                    <Input
-                      id="task-time-start"
-                      type="text"
-                      placeholder="09:00 AM"
-                      value={taskTimeStart}
-                      onChange={(e) => setTaskTimeStart(e.target.value)}
-                      className="rounded-xl h-12 border-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="task-time-end" className="text-xs font-medium text-muted-foreground">End Time</Label>
-                    <Input
-                      id="task-time-end"
-                      type="text"
-                      placeholder="10:00 AM"
-                      value={taskTimeEnd}
-                      onChange={(e) => setTaskTimeEnd(e.target.value)}
-                      className="rounded-xl h-12 border-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all"
-                    />
+                
+                {/* Time Range Selector - Microsoft Teams Style */}
+                <div className={`rounded-xl border-2 p-4 transition-all ${
+                  timeRangeError ? "border-destructive bg-destructive/5" : "border-border bg-background"
+                }`}>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    {/* Start Time */}
+                    <div className="flex-1 w-full sm:w-auto min-w-0">
+                      <Label className="text-xs font-medium text-muted-foreground mb-2 block">Start Time</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Select
+                          value={(() => {
+                            if (!taskTimeStart) return "";
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? `${match[1]}` : "";
+                          })()}
+                          onValueChange={(hour) => {
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const minutes = match ? match[2] : "00";
+                            const period = match ? match[3] : "AM";
+                            const newTime = `${hour}:${minutes} ${period}`;
+                            handleTimeStartChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue placeholder="H" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => (
+                              <SelectItem key={hour} value={hour.toString()}>
+                                {hour}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-muted-foreground font-medium text-sm">:</span>
+                        <Select
+                          value={(() => {
+                            if (!taskTimeStart) return "";
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? match[2] : "";
+                          })()}
+                          onValueChange={(min) => {
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const hour = match ? match[1] : "9";
+                            const period = match ? match[3] : "AM";
+                            const newTime = `${hour}:${min} ${period}`;
+                            handleTimeStartChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue placeholder="M" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["00", "15", "30", "45"].map((min) => (
+                              <SelectItem key={min} value={min}>
+                                {min}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={(() => {
+                            if (!taskTimeStart) return "AM";
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? match[3].toUpperCase() : "AM";
+                          })()}
+                          onValueChange={(period) => {
+                            const match = taskTimeStart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const hour = match ? match[1] : "9";
+                            const minutes = match ? match[2] : "00";
+                            const newTime = `${hour}:${minutes} ${period}`;
+                            handleTimeStartChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="AM">AM</SelectItem>
+                            <SelectItem value="PM">PM</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    {/* End Time */}
+                    <div className="flex-1 w-full sm:w-auto min-w-0">
+                      <Label className="text-xs font-medium text-muted-foreground mb-2 block">End Time</Label>
+                      <div className="flex items-center gap-1.5">
+                        <Select
+                          value={(() => {
+                            if (!taskTimeEnd) return "";
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? `${match[1]}` : "";
+                          })()}
+                          onValueChange={(hour) => {
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const minutes = match ? match[2] : "00";
+                            const period = match ? match[3] : "AM";
+                            const newTime = `${hour}:${minutes} ${period}`;
+                            handleTimeEndChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue placeholder="H" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Array.from({ length: 12 }, (_, i) => i + 1).map((hour) => (
+                              <SelectItem key={hour} value={hour.toString()}>
+                                {hour}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <span className="text-muted-foreground font-medium text-sm">:</span>
+                        <Select
+                          value={(() => {
+                            if (!taskTimeEnd) return "";
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? match[2] : "";
+                          })()}
+                          onValueChange={(min) => {
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const hour = match ? match[1] : "10";
+                            const period = match ? match[3] : "AM";
+                            const newTime = `${hour}:${min} ${period}`;
+                            handleTimeEndChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue placeholder="M" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {["00", "15", "30", "45"].map((min) => (
+                              <SelectItem key={min} value={min}>
+                                {min}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={(() => {
+                            if (!taskTimeEnd) return "AM";
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            return match ? match[3].toUpperCase() : "AM";
+                          })()}
+                          onValueChange={(period) => {
+                            const match = taskTimeEnd.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+                            const hour = match ? match[1] : "10";
+                            const minutes = match ? match[2] : "00";
+                            const newTime = `${hour}:${minutes} ${period}`;
+                            handleTimeEndChange(newTime);
+                          }}
+                        >
+                          <SelectTrigger className="rounded-lg h-10 border-2 w-16 [&_svg]:size-3 [&_svg]:opacity-40">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="AM">AM</SelectItem>
+                            <SelectItem value="PM">PM</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {["09:00 AM", "10:00 AM", "11:00 AM", "02:00 PM", "03:00 PM"].map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      onClick={() => {
-                        if (!taskTimeStart) {
-                          setTaskTimeStart(time);
-                        } else if (!taskTimeEnd) {
-                          setTaskTimeEnd(time);
-                        }
-                      }}
-                      className="text-xs px-2 py-1 rounded-lg border border-border bg-background hover:bg-primary/10 hover:border-primary/30 transition-all"
-                    >
-                      {time}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Format: HH:MM AM/PM (e.g., 09:00 AM, 02:30 PM)
-                </p>
+                
+                {timeRangeError && (
+                  <p className="text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {timeRangeError}
+                  </p>
+                )}
               </motion.div>
 
               {/* Reference Links */}
@@ -1194,15 +1404,6 @@ export default function CalendarPage() {
                   onChange={(e) => setTaskReferenceLinks(e.target.value)}
                   className="rounded-xl min-h-[100px] text-base font-mono text-sm resize-none border-2 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all"
                 />
-                <div className="flex justify-between items-center">
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Link2 className="h-3 w-3" />
-                    Add one URL per line (optional)
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {taskReferenceLinks.split("\n").filter(l => l.trim()).length} link(s)
-                  </p>
-                </div>
               </motion.div>
 
               {/* Action Buttons */}
@@ -1262,46 +1463,11 @@ export default function CalendarPage() {
         <Dialog open={isQuickViewOpen} onOpenChange={setIsQuickViewOpen}>
           <DialogContent className="rounded-2xl max-w-2xl">
             <DialogHeader>
-              <div className="flex items-center gap-3">
-                {quickViewTask && (
-                  <motion.button
-                    onClick={() => {
-                      if (quickViewTaskDate) {
-                        handleToggleTaskCompletion(quickViewTask.id, quickViewTaskDate);
-                        // Update the quick view task state
-                        setQuickViewTask({ ...quickViewTask, completed: !quickViewTask.completed });
-                      }
-                    }}
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    className={`rounded-full transition-all duration-200 flex items-center justify-center ${
-                      quickViewTask.completed
-                        ? "bg-primary text-primary-foreground shadow-lg ring-2 ring-primary/30"
-                        : "bg-background/80 border-2 border-border text-muted-foreground hover:bg-primary/10 hover:border-primary/60 hover:text-primary"
-                    } h-8 w-8`}
-                  >
-                    {quickViewTask.completed ? (
-                      <motion.div
-                        initial={{ scale: 0, rotate: -180 }}
-                        animate={{ scale: 1, rotate: 0 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 25 }}
-                      >
-                        <CheckCircle className="h-5 w-5 fill-current stroke-2 stroke-primary-foreground" />
-                      </motion.div>
-                    ) : (
-                      <Circle className="h-5 w-5 stroke-2" />
-                    )}
-                  </motion.button>
-                )}
-                <DialogTitle className={`text-2xl flex-1 ${
-                  quickViewTask?.completed ? "line-through opacity-60" : ""
-                }`}>
-                  {quickViewTask?.title || "Task Details"}
-                </DialogTitle>
-              </div>
-              <DialogDescription>
-                View all task information
-              </DialogDescription>
+              <DialogTitle className={`text-2xl ${
+                quickViewTask?.completed ? "line-through opacity-60" : ""
+              }`}>
+                {quickViewTask?.title || "Task Details"}
+              </DialogTitle>
             </DialogHeader>
             {quickViewTask && (
               <div className="mt-4 space-y-5">
@@ -1325,9 +1491,9 @@ export default function CalendarPage() {
                   <div>
                     {quickViewTask.priority ? (
                       <span className={`inline-block text-xs px-4 py-2 rounded-full font-semibold border ${
-                        quickViewTask.priority === "high" ? "bg-destructive/20 text-destructive border-destructive/40" :
-                        quickViewTask.priority === "medium" ? "bg-warning/20 text-warning border-warning/40" :
-                        "bg-primary/20 text-primary border-primary/40"
+                        quickViewTask.priority === "high" ? "bg-red-500/20 text-red-600 border-red-500/40" :
+                        quickViewTask.priority === "medium" ? "bg-yellow-500/20 text-yellow-600 border-yellow-500/40" :
+                        "bg-green-500/20 text-green-600 border-green-500/40"
                       }`}>
                         {quickViewTask.priority.charAt(0).toUpperCase() + quickViewTask.priority.slice(1)}
                       </span>
@@ -1392,33 +1558,61 @@ export default function CalendarPage() {
                 </div>
 
                 {/* Action Buttons */}
-                <div className="flex gap-3 pt-4 border-t border-border">
+                <div className="flex flex-col gap-3 pt-4 border-t border-border">
                   <Button
-                    variant="outline"
                     onClick={() => {
-                      setIsQuickViewOpen(false);
-                      if (quickViewTaskDate) {
-                        handleEditTask(quickViewTask, quickViewTaskDate);
+                      if (quickViewTaskDate && quickViewTask) {
+                        handleToggleTaskCompletion(quickViewTask.id, quickViewTaskDate);
+                        // Update the quick view task state
+                        setQuickViewTask({ ...quickViewTask, completed: !quickViewTask.completed });
                       }
                     }}
-                    className="flex-1 rounded-xl"
+                    className={`w-full rounded-xl ${
+                      quickViewTask?.completed
+                        ? "bg-green-500 hover:bg-green-600 text-white"
+                        : "bg-primary hover:bg-primary/90 text-primary-foreground"
+                    }`}
                   >
-                    <Edit className="mr-2 h-4 w-4 stroke-[1.5]" />
-                    Edit Task
+                    {quickViewTask?.completed ? (
+                      <>
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                        Mark as Incomplete
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Mark as Complete
+                      </>
+                    )}
                   </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      if (quickViewTaskDate) {
-                        handleDeleteTask(quickViewTask.id, quickViewTaskDate);
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
                         setIsQuickViewOpen(false);
-                      }
-                    }}
-                    className="flex-1 rounded-xl"
-                  >
-                    <Trash2 className="mr-2 h-4 w-4 stroke-[1.5]" />
-                    Delete Task
-                  </Button>
+                        if (quickViewTaskDate && quickViewTask) {
+                          handleEditTask(quickViewTask, quickViewTaskDate);
+                        }
+                      }}
+                      className="flex-1 rounded-xl"
+                    >
+                      <Edit className="mr-2 h-4 w-4 stroke-[1.5]" />
+                      Edit Task
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        if (quickViewTaskDate && quickViewTask) {
+                          handleDeleteTask(quickViewTask.id, quickViewTaskDate);
+                          setIsQuickViewOpen(false);
+                        }
+                      }}
+                      className="flex-1 rounded-xl"
+                    >
+                      <Trash2 className="mr-2 h-4 w-4 stroke-[1.5]" />
+                      Delete Task
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1457,17 +1651,32 @@ export default function CalendarPage() {
               {/* Messages Area */}
               <div className="flex-1 overflow-y-auto px-6 py-6">
                 <div className="space-y-4">
-                  {/* AI Initial Message */}
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                      <Sparkles className="h-4 w-4 stroke-[1.5] text-primary" />
+                  {aiMessages.map((msg, index) => (
+                    <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      {msg.role === 'ai' && (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                          <Sparkles className="h-4 w-4 stroke-[1.5] text-primary" />
+                        </div>
+                      )}
+                      <div className={`flex-1 rounded-xl p-4 ${
+                        msg.role === 'user' 
+                          ? 'bg-primary/10 rounded-tr-none' 
+                          : 'bg-muted/50 rounded-tl-none'
+                      }`}>
+                        <p className="text-sm text-foreground">{msg.message}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 rounded-xl rounded-tl-none bg-muted/50 p-4">
-                      <p className="text-sm text-foreground">
-                        Hello! I'm your AI Task Assistant. I can help you organize, prioritize, and manage your tasks efficiently. How can I help you today?
-                      </p>
+                  ))}
+                  {aiLoading && (
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <Sparkles className="h-4 w-4 stroke-[1.5] text-primary" />
+                      </div>
+                      <div className="flex-1 rounded-xl rounded-tl-none bg-muted/50 p-4">
+                        <p className="text-sm text-muted-foreground">Thinking...</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -1479,23 +1688,19 @@ export default function CalendarPage() {
                     placeholder="Ask me anything..."
                     value={aiMessage}
                     onChange={(e) => setAiMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && aiMessage.trim()) {
-                        // Handle send message
-                        setAiMessage("");
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter" && aiMessage.trim() && !aiLoading) {
+                        await handleSendAIMessage();
                       }
                     }}
                     className="rounded-xl"
+                    disabled={aiLoading}
                   />
                   <Button
                     size="icon"
                     className="rounded-xl"
-                    onClick={() => {
-                      if (aiMessage.trim()) {
-                        // Handle send message
-                        setAiMessage("");
-                      }
-                    }}
+                    onClick={handleSendAIMessage}
+                    disabled={aiLoading || !aiMessage.trim()}
                   >
                     <Send className="h-4 w-4 stroke-[1.5]" />
                   </Button>
@@ -1542,10 +1747,9 @@ export default function CalendarPage() {
                     </div>
                   </div>
 
-                  {/* Name and Title */}
+                  {/* Name */}
                   <div className="text-center">
-                    <h3 className="text-xl font-bold tracking-wide">John doe</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Engineer</p>
+                    <h3 className="text-xl font-bold tracking-wide">{user?.name || "User"}</h3>
                   </div>
 
                   {/* Task Statistics */}
@@ -1575,9 +1779,10 @@ export default function CalendarPage() {
                         <Input
                           id="profile-name"
                           type="text"
-                          defaultValue="John doe"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
                           className="rounded-xl"
-                          disabled
+                          disabled={!isEditingProfile}
                         />
                       </div>
                       <div className="space-y-2">
@@ -1585,17 +1790,8 @@ export default function CalendarPage() {
                         <Input
                           id="profile-email"
                           type="email"
-                          defaultValue="john.doe@example.com"
-                          className="rounded-xl"
-                          disabled
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="profile-title" className="text-sm">Title</Label>
-                        <Input
-                          id="profile-title"
-                          type="text"
-                          defaultValue="Engineer"
+                          value={profileEmail}
+                          onChange={(e) => setProfileEmail(e.target.value)}
                           className="rounded-xl"
                           disabled
                         />
@@ -1605,17 +1801,88 @@ export default function CalendarPage() {
 
                   {/* Action Buttons */}
                   <div className="space-y-3 pt-2">
-                    <Button className="w-full rounded-xl" size="lg">
-                      Edit Profile
-                    </Button>
-                    <Button variant="outline" className="w-full rounded-xl" size="lg">
+                    {isEditingProfile ? (
+                      <>
+                        <Button 
+                          className="w-full rounded-xl" 
+                          size="lg"
+                          onClick={async () => {
+                            try {
+                              setProfileLoading(true);
+                              const response = await apiClient.updateProfile({
+                                name: profileName,
+                              });
+                              if (response.success) {
+                                setUser({
+                                  ...user!,
+                                  name: profileName,
+                                });
+                                setIsEditingProfile(false);
+                              }
+                            } catch (error: any) {
+                              console.error('Failed to update profile:', error);
+                              alert(error.message || 'Failed to update profile');
+                            } finally {
+                              setProfileLoading(false);
+                            }
+                          }}
+                          disabled={profileLoading || !profileName.trim()}
+                        >
+                          {profileLoading ? "Saving..." : "Save Changes"}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          className="w-full rounded-xl" 
+                          size="lg"
+                          onClick={() => {
+                            setIsEditingProfile(false);
+                            setProfileName(user?.name || "");
+                            setProfileEmail(user?.email || "");
+                            setProfileTitle(user?.title || "");
+                          }}
+                          disabled={profileLoading}
+                        >
+                          Cancel
+                        </Button>
+                      </>
+                    ) : (
+                      <Button 
+                        className="w-full rounded-xl" 
+                        size="lg"
+                        onClick={() => {
+                          setIsEditingProfile(true);
+                          setProfileName(user?.name || "");
+                          setProfileEmail(user?.email || "");
+                          setProfileTitle(user?.title || "");
+                        }}
+                      >
+                        Edit Profile
+                      </Button>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      className="w-full rounded-xl" 
+                      size="lg"
+                      onClick={() => {
+                        setIsChangePasswordOpen(true);
+                        setOldPassword("");
+                        setNewPassword("");
+                        setConfirmPassword("");
+                        setPasswordError("");
+                      }}
+                    >
                       Change Password
                     </Button>
                     <Button
                       variant="destructive"
                       className="w-full rounded-xl"
                       size="lg"
-                      onClick={() => {
+                      onClick={async () => {
+                        try {
+                          await apiClient.logout();
+                        } catch (error) {
+                          console.error('Logout error:', error);
+                        }
                         router.push("/signin");
                       }}
                     >
@@ -1629,6 +1896,140 @@ export default function CalendarPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Change Password Dialog */}
+      <Dialog open={isChangePasswordOpen} onOpenChange={setIsChangePasswordOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Change Password</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="old-password" className="text-sm font-semibold">
+                Current Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="old-password"
+                type="password"
+                placeholder="Enter your current password"
+                value={oldPassword}
+                onChange={(e) => {
+                  setOldPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-password" className="text-sm font-semibold">
+                New Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="new-password"
+                type="password"
+                placeholder="Enter your new password"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password" className="text-sm font-semibold">
+                Confirm New Password <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="Confirm your new password"
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  setPasswordError("");
+                }}
+                className="rounded-xl"
+              />
+            </div>
+            {passwordError && (
+              <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                <span>{passwordError}</span>
+              </div>
+            )}
+            <div className="flex gap-3 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsChangePasswordOpen(false);
+                  setOldPassword("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                  setPasswordError("");
+                }}
+                className="flex-1 rounded-xl"
+                disabled={changePasswordLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  // Validate passwords
+                  if (!oldPassword.trim()) {
+                    setPasswordError("Current password is required");
+                    return;
+                  }
+                  if (!newPassword.trim()) {
+                    setPasswordError("New password is required");
+                    return;
+                  }
+                  if (newPassword.length < 6) {
+                    setPasswordError("New password must be at least 6 characters");
+                    return;
+                  }
+                  if (newPassword !== confirmPassword) {
+                    setPasswordError("New passwords do not match");
+                    return;
+                  }
+                  if (oldPassword === newPassword) {
+                    setPasswordError("New password must be different from current password");
+                    return;
+                  }
+
+                  try {
+                    setChangePasswordLoading(true);
+                    setPasswordError("");
+                    const response = await apiClient.changePassword({
+                      currentPassword: oldPassword,
+                      newPassword: newPassword,
+                    });
+                    if (response.success) {
+                      setIsChangePasswordOpen(false);
+                      setOldPassword("");
+                      setNewPassword("");
+                      setConfirmPassword("");
+                      setPasswordError("");
+                      alert("Password changed successfully!");
+                    } else {
+                      setPasswordError(response.message || "Failed to change password");
+                    }
+                  } catch (error: any) {
+                    console.error('Failed to change password:', error);
+                    setPasswordError(error.message || "Failed to change password. Please check your current password.");
+                  } finally {
+                    setChangePasswordLoading(false);
+                  }
+                }}
+                className="flex-1 rounded-xl"
+                disabled={changePasswordLoading || !oldPassword.trim() || !newPassword.trim() || !confirmPassword.trim()}
+              >
+                {changePasswordLoading ? "Changing..." : "Change Password"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

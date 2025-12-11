@@ -2,12 +2,41 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiClient } from "@/lib/api-client";
+import { AlertCircle } from "lucide-react";
 
 export default function SignUpPage() {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await apiClient.signup({ name, email, password });
+      if (response.success) {
+        router.push("/signin");
+      } else {
+        setError(response.message || "Sign up failed. Please try again.");
+      }
+    } catch (err: any) {
+      setError(err.message || "Failed to sign up. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-8 sm:px-6 sm:py-12" style={{ background: 'linear-gradient(to bottom right, var(--gradient-from), var(--gradient-via), var(--gradient-to))' }}>
       {/* Pattern Overlay - Dot Grid */}
@@ -47,7 +76,13 @@ export default function SignUpPage() {
               </p>
             </div>
 
-            <form className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="rounded-xl bg-destructive/10 border border-destructive/20 p-3 flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{error}</span>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="name">Name</Label>
                 <Input
@@ -55,6 +90,10 @@ export default function SignUpPage() {
                   type="text"
                   placeholder="John Doe"
                   className="rounded-xl"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -64,6 +103,10 @@ export default function SignUpPage() {
                   type="email"
                   placeholder="you@example.com"
                   className="rounded-xl"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
@@ -73,10 +116,15 @@ export default function SignUpPage() {
                   type="password"
                   placeholder="••••••••"
                   className="rounded-xl"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  disabled={loading}
                 />
               </div>
-              <Button type="submit" className="w-full rounded-xl">
-                Sign Up
+              <Button type="submit" className="w-full rounded-xl" disabled={loading}>
+                {loading ? "Creating account..." : "Sign Up"}
               </Button>
             </form>
 
