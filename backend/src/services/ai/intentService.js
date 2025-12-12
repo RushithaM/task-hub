@@ -13,6 +13,7 @@ const SUPPORTED_INTENTS = [
   'delete_task',
   'summarize_tasks',
   'task_suggestions',
+  'out_of_scope',
 ];
 
 /**
@@ -81,6 +82,7 @@ export const parseIntent = async (userText, userId) => {
       task: parsedResponse.task || {},
       taskId: parsedResponse.taskId || null,
       notes: parsedResponse.notes || '',
+      message: parsedResponse.message || '',
     };
 
     // Debug logging for AI response
