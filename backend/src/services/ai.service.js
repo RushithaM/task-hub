@@ -416,16 +416,6 @@ export const ask = async (userId, message) => {
 
     // Execute action based on intent
     switch (intent) {
-      case 'out_of_scope': {
-        // Return the out-of-scope message directly
-        const outOfScopeMessage = payload.message || 'I apologize but I cannot help you with this since it is beyond my scope.';
-        return {
-          response: outOfScopeMessage,
-          intent: 'out_of_scope',
-          result: null,
-        };
-      }
-
       case 'list_tasks': {
         const filters = payload.filters || {};
         result = await taskService.getTasks(userId, filters);
