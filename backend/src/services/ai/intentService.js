@@ -2,6 +2,7 @@ import { getGroqClient } from './groqClient.js';
 import { INTENT_SYSTEM_PROMPT, buildUserPrompt } from './prompts.js';
 import { logger } from '../../utils/logger.js';
 import Task from '../../models/Task.js';
+import { retryWithBackoff } from '../../utils/retryHandler.js';
 
 /**
  * Supported intent types
@@ -39,18 +40,25 @@ export const parseIntent = async (userText, userId) => {
 
     const client = getGroqClient();
 
-    // Call Groq API
+    // Call Groq API with retry logic
     // Using llama-3.3-70b-versatile (replacement for deprecated llama-3.1-70b-versatile)
     // Alternative models: llama-3.1-8b-instant, mixtral-8x7b-32768
-    const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: INTENT_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.3,
-    });
+    const completion = await retryWithBackoff(
+      async () => {
+        return await client.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: INTENT_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.3,
+        });
+      },
+      {
+        operationName: 'parseIntent',
+      }
+    );
 
     const responseText = completion.choices[0]?.message?.content;
 
@@ -106,13 +114,19 @@ export const parseIntent = async (userText, userId) => {
       payload,
     };
   } catch (error) {
+    // Enhanced error logging with retry context
     logger.error('Intent parsing error:', {
       message: error.message,
-      stack: error.stack,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
       name: error.name,
+      errorCode: error.code,
+      status: error.status || error.statusCode,
       ...(error.response && { response: error.response }),
-      ...(error.status && { status: error.status }),
+      originalUserText: userText?.substring(0, 100),
     });
+    
+    // Preserve intent in error for better fallback handling
+    error.intent = null; // Will be set by caller if available
     
     // Re-throw with context if it's not already a known error
     if (error.message.includes('GROQ_API_KEY') || 

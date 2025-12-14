@@ -6,6 +6,8 @@ import * as analyticsService from './analytics.service.js';
 import { getGroqClient } from './ai/groqClient.js';
 import { FORMAT_RESPONSE_PROMPT } from './ai/prompts.js';
 import mongoose from 'mongoose';
+import { retryWithBackoff } from '../utils/retryHandler.js';
+import { getUserFriendlyMessage, getFallbackSuggestions, classifyError } from '../utils/errorClassifier.js';
 
 /**
  * AI chat service (legacy - kept for backward compatibility)
@@ -116,18 +118,26 @@ Return JSON in this format:
   "timeEnd": "HH:MM or null"
 }`;
 
-    const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        { 
-          role: 'system', 
-          content: 'You are a task extraction assistant. Extract task details from natural language and return ONLY valid JSON, no explanations.' 
-        },
-        { role: 'user', content: extractionPrompt },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.2, // Lower temperature for more consistent extraction
-    });
+    // Wrap Groq API call with retry logic
+    const completion = await retryWithBackoff(
+      async () => {
+        return await client.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'You are a task extraction assistant. Extract task details from natural language and return ONLY valid JSON, no explanations.' 
+            },
+            { role: 'user', content: extractionPrompt },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.2, // Lower temperature for more consistent extraction
+        });
+      },
+      {
+        operationName: 'extractTaskDetailsWithAI',
+      }
+    );
 
     const responseText = completion.choices[0]?.message?.content;
     if (!responseText) {
@@ -360,22 +370,34 @@ const formatResponse = async (intent, result, originalMessage) => {
         contextMessage = 'Operation completed';
     }
 
-    const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        { role: 'system', content: FORMAT_RESPONSE_PROMPT },
-        { 
-          role: 'user', 
-          content: `User asked: "${originalMessage}"\n\nOperation: ${intent}\nResult: ${JSON.stringify(result)}\n\nGenerate a friendly, concise response message.`
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 200,
-    });
+    // Wrap Groq API call with retry logic
+    const completion = await retryWithBackoff(
+      async () => {
+        return await client.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          messages: [
+            { role: 'system', content: FORMAT_RESPONSE_PROMPT },
+            { 
+              role: 'user', 
+              content: `User asked: "${originalMessage}"\n\nOperation: ${intent}\nResult: ${JSON.stringify(result)}\n\nGenerate a friendly, concise response message.`
+            },
+          ],
+          temperature: 0.7,
+          max_tokens: 200,
+        });
+      },
+      {
+        operationName: 'formatResponse',
+      }
+    );
 
     return completion.choices[0]?.message?.content || contextMessage;
   } catch (error) {
-    logger.warn('Failed to format response with Groq, using fallback:', error);
+    logger.warn('Failed to format response with Groq, using fallback:', {
+      error: error.message,
+      intent,
+      errorCategory: classifyError(error),
+    });
     // Fallback to simple message
     switch (intent) {
       case 'create_task':
@@ -403,6 +425,9 @@ const formatResponse = async (intent, result, originalMessage) => {
  * @returns {Promise<Object>} Response with formatted message and results
  */
 export const ask = async (userId, message) => {
+  const originalMessage = message || '';
+  let currentIntent = null;
+  
   try {
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       throw new Error('Message is required and must be a non-empty string');
@@ -410,6 +435,7 @@ export const ask = async (userId, message) => {
 
     // Parse intent from user message
     const { intent, payload } = await parseIntent(message, userId);
+    currentIntent = intent;
 
     let result = null;
     let response = '';
@@ -653,13 +679,36 @@ export const ask = async (userId, message) => {
       result,
     };
   } catch (error) {
+    // Classify error and get user-friendly message
+    const errorCategory = classifyError(error);
+    const userFriendlyMessage = getUserFriendlyMessage(error, {
+      intent: currentIntent || 'unknown',
+      operation: 'ask',
+    });
+    const suggestions = getFallbackSuggestions(errorCategory, {
+      intent: currentIntent || 'unknown',
+    });
+
+    // Enhanced error logging with context
     logger.error('AI ask error:', {
       message: error.message,
-      stack: error.stack,
-      originalUserMessage: message,
+      errorCategory,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      originalUserMessage: originalMessage,
       userId,
+      intent: currentIntent,
+      errorCode: error.code,
+      status: error.status || error.statusCode,
     });
-    throw error;
+
+    // Create enhanced error with user-friendly message
+    const enhancedError = new Error(userFriendlyMessage);
+    enhancedError.originalError = error;
+    enhancedError.category = errorCategory;
+    enhancedError.suggestions = suggestions;
+    enhancedError.intent = currentIntent;
+    
+    throw enhancedError;
   }
 };
 

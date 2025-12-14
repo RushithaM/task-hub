@@ -46,6 +46,18 @@ export const ask = async (req, res, next) => {
       data,
     });
   } catch (error) {
+    // Handle enhanced errors with suggestions
+    if (error.suggestions && error.category) {
+      // Return user-friendly error with suggestions
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'An error occurred while processing your request',
+        error: error.category,
+        suggestions: error.suggestions,
+      });
+    }
+    
+    // Fallback to standard error handling
     next(error);
   }
 };
