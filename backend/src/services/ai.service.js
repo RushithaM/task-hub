@@ -179,6 +179,57 @@ Return JSON in this format:
 };
 
 /**
+ * Find task by name and date for the given user
+ * @param {string} userId - User ID
+ * @param {string} taskName - Task name/title to search for
+ * @param {string|null} taskDate - Optional date in YYYY-MM-DD format
+ * @returns {Promise<Object|null>} Found task or null
+ */
+const findTaskByNameAndDate = async (userId, taskName, taskDate = null) => {
+  try {
+    const query = {
+      userId,
+      title: { $regex: new RegExp(taskName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+    };
+
+    // If date is provided, normalize it and add to query
+    if (taskDate) {
+      const normalizedDate = normalizeDate(String(taskDate));
+      if (normalizedDate) {
+        // Match date exactly (stored as Date object in DB, compare as ISO string)
+        const dateObj = new Date(normalizedDate);
+        dateObj.setHours(0, 0, 0, 0);
+        const nextDay = new Date(dateObj);
+        nextDay.setDate(nextDay.getDate() + 1);
+        
+        query.date = {
+          $gte: dateObj,
+          $lt: nextDay,
+        };
+      }
+    }
+
+    const task = await Task.findOne(query).select('_id title date').lean();
+
+    if (task) {
+      logger.info('Found task by name and date:', {
+        taskName,
+        taskDate,
+        foundTaskId: task._id.toString(),
+        foundTitle: task.title,
+        foundDate: task.date ? new Date(task.date).toISOString().split('T')[0] : null,
+      });
+      return task;
+    }
+
+    return null;
+  } catch (error) {
+    logger.error('Error finding task by name and date:', error);
+    return null;
+  }
+};
+
+/**
  * Normalize relative date strings to YYYY-MM-DD format
  * Handles: today, tomorrow, next week, next month, day names, etc.
  * @param {string} dateValue - Date string (relative or absolute)
@@ -530,13 +581,62 @@ export const ask = async (userId, message) => {
           throw new Error('Task ID is required to update a task. Please specify which task you want to update.');
         }
 
-        // Validate taskId format
-        if (!mongoose.Types.ObjectId.isValid(payload.taskId)) {
-          logger.error('Update task failed - invalid taskId format:', {
-            taskId: payload.taskId,
+        let taskId = payload.taskId;
+
+        // If taskId is not a valid ObjectId, try to find task by name and date
+        if (!mongoose.Types.ObjectId.isValid(taskId)) {
+          // Extract date from payload.task.date or payload.filters.date
+          const taskDate = payload.task?.date 
+            ? normalizeDate(String(payload.task.date)) 
+            : (payload.filters?.date ? normalizeDate(String(payload.filters.date)) : null);
+
+          logger.warn('TaskId is not a valid ObjectId, attempting to find task by name and date:', {
+            providedTaskId: taskId,
+            taskDate,
             originalMessage: message,
           });
-          throw new Error(`Invalid task ID format: "${payload.taskId}". Task IDs must be valid MongoDB ObjectIds.`);
+
+          // Try to find task by name and date
+          const taskByNameAndDate = await findTaskByNameAndDate(userId, taskId, taskDate);
+
+          if (taskByNameAndDate) {
+            taskId = taskByNameAndDate._id.toString();
+            logger.info('Found task by name and date, using taskId:', {
+              originalQuery: payload.taskId,
+              searchDate: taskDate,
+              foundTaskId: taskId,
+              foundTitle: taskByNameAndDate.title,
+            });
+          } else {
+            // Fallback: try by name only if date was provided but no match found
+            if (taskDate) {
+              logger.warn('No task found with name and date, trying name only:', {
+                taskName: taskId,
+                taskDate,
+              });
+              const taskByNameOnly = await findTaskByNameAndDate(userId, taskId, null);
+              if (taskByNameOnly) {
+                taskId = taskByNameOnly._id.toString();
+                logger.info('Found task by name only (date mismatch), using taskId:', {
+                  foundTaskId: taskId,
+                  foundTitle: taskByNameOnly.title,
+                });
+              } else {
+                logger.error('Update task failed - task not found by name and date, or name only:', {
+                  taskId: payload.taskId,
+                  taskDate,
+                  originalMessage: message,
+                });
+                throw new Error(`Could not find a task with ID, name "${payload.taskId}"${taskDate ? ` and date ${taskDate}` : ''}. Please specify the task ID or exact task name${taskDate ? ' and date' : ''}.`);
+              }
+            } else {
+              logger.error('Update task failed - task not found by name:', {
+                taskId: payload.taskId,
+                originalMessage: message,
+              });
+              throw new Error(`Could not find a task with ID or name "${payload.taskId}". Please specify the task ID or exact task name and date.`);
+            }
+          }
         }
 
         // Validate and normalize update data
@@ -551,7 +651,7 @@ export const ask = async (userId, message) => {
           throw new Error('No valid fields provided for update. Please specify what you want to change about the task.');
         }
 
-        result = await taskService.updateTask(payload.taskId, userId, validatedUpdate);
+        result = await taskService.updateTask(taskId, userId, validatedUpdate);
         response = await formatResponse(intent, result, message);
         break;
       }
@@ -565,16 +665,65 @@ export const ask = async (userId, message) => {
           throw new Error('Task ID is required to delete a task. Please specify which task you want to delete.');
         }
 
-        // Validate taskId format
-        if (!mongoose.Types.ObjectId.isValid(payload.taskId)) {
-          logger.error('Delete task failed - invalid taskId format:', {
-            taskId: payload.taskId,
+        let taskId = payload.taskId;
+
+        // If taskId is not a valid ObjectId, try to find task by name and date
+        if (!mongoose.Types.ObjectId.isValid(taskId)) {
+          // Extract date from payload.task.date or payload.filters.date (for delete_task)
+          const taskDate = payload.task?.date 
+            ? normalizeDate(String(payload.task.date)) 
+            : (payload.filters?.date ? normalizeDate(String(payload.filters.date)) : null);
+
+          logger.warn('TaskId is not a valid ObjectId, attempting to find task by name and date:', {
+            providedTaskId: taskId,
+            taskDate,
             originalMessage: message,
           });
-          throw new Error(`Invalid task ID format: "${payload.taskId}". Task IDs must be valid MongoDB ObjectIds.`);
+
+          // Try to find task by name and date
+          const taskByNameAndDate = await findTaskByNameAndDate(userId, taskId, taskDate);
+
+          if (taskByNameAndDate) {
+            taskId = taskByNameAndDate._id.toString();
+            logger.info('Found task by name and date, using taskId:', {
+              originalQuery: payload.taskId,
+              searchDate: taskDate,
+              foundTaskId: taskId,
+              foundTitle: taskByNameAndDate.title,
+            });
+          } else {
+            // Fallback: try by name only if date was provided but no match found
+            if (taskDate) {
+              logger.warn('No task found with name and date, trying name only:', {
+                taskName: taskId,
+                taskDate,
+              });
+              const taskByNameOnly = await findTaskByNameAndDate(userId, taskId, null);
+              if (taskByNameOnly) {
+                taskId = taskByNameOnly._id.toString();
+                logger.info('Found task by name only (date mismatch), using taskId:', {
+                  foundTaskId: taskId,
+                  foundTitle: taskByNameOnly.title,
+                });
+              } else {
+                logger.error('Delete task failed - task not found by name and date, or name only:', {
+                  taskId: payload.taskId,
+                  taskDate,
+                  originalMessage: message,
+                });
+                throw new Error(`Could not find a task with ID, name "${payload.taskId}"${taskDate ? ` and date ${taskDate}` : ''}. Please specify the task ID or exact task name${taskDate ? ' and date' : ''}.`);
+              }
+            } else {
+              logger.error('Delete task failed - task not found by name:', {
+                taskId: payload.taskId,
+                originalMessage: message,
+              });
+              throw new Error(`Could not find a task with ID or name "${payload.taskId}". Please specify the task ID or exact task name and date.`);
+            }
+          }
         }
 
-        result = await taskService.deleteTask(payload.taskId, userId);
+        result = await taskService.deleteTask(taskId, userId);
         response = await formatResponse(intent, result, message);
         break;
       }

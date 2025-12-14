@@ -52,7 +52,14 @@ RULES:
    - Also extract other fields if mentioned: date, priority, description, time, etc.
    - If the user message is ambiguous, extract the most likely task description as the title.
 
-6. For update_task: fill the "task" object with fields to update. Title is optional for updates.
+6. For update_task: 
+   - Fill the "task" object with fields to update. Title is optional for updates.
+   - For "taskId": extract the actual MongoDB ObjectId if mentioned, OR use the task name/title AND date to look it up.
+   - If user mentions a task by name (e.g., "edit task 'Implement pagination'"), also extract the date if mentioned (e.g., "on 2024-12-15" or "for tomorrow").
+   - Store the task name in "taskId" field if it's not a valid ObjectId (the system will look it up by name + date).
+   - Store the date in "task.date" field if mentioned - this will be used for lookup along with the name.
+   - IMPORTANT: Do NOT use list numbers (1, 2, 3) as taskIds. These are just list indices, not task IDs.
+   - The system will search for tasks by matching both name (title) AND date for precise identification.
 
 7. For list_tasks: use "filters" to specify search criteria (date, priority, completed status, etc.).
    - IMPORTANT: When date filters are present, convert relative date strings into structured date range objects.
@@ -69,7 +76,14 @@ RULES:
    - Use the current date provided in the user prompt context to calculate relative dates accurately.
    - Always return dates in YYYY-MM-DD format.
 
-8. For delete_task/update_task: extract "taskId" when possible from context or user message.
+8. For delete_task/update_task: 
+   - Extract "taskId" (MongoDB ObjectId) when explicitly mentioned in user message.
+   - If user mentions task by name/title, extract BOTH the name and date if mentioned.
+   - Store the task name in "taskId" field if it's not a valid ObjectId (system will look it up).
+   - For update_task: Store the date in "task.date" field if mentioned.
+   - For delete_task: Store the date in "filters.date" or "task.date" field if mentioned - this will be used for lookup along with the name.
+   - Do NOT use list numbers (1, 2, 3) as taskIds - these are indices, not IDs.
+   - The system searches by matching both name (title) AND date for precise task identification.
 
 9. If uncertain about optional fields, set them to null instead of guessing.
 
@@ -90,10 +104,13 @@ export const buildUserPrompt = (userText, context = {}) => {
   prompt += `\n\nCurrent date: ${todayStr}`;
 
   if (context.recentTasks && context.recentTasks.length > 0) {
-    prompt += `\n\nUser's recent tasks for context:\n`;
+    prompt += `\n\nUser's recent tasks for context (use task IDs, not list numbers):\n`;
     context.recentTasks.slice(0, 5).forEach((task, index) => {
-      prompt += `${index + 1}. ${task.title} (${task.priority} priority, ${task.completed ? 'completed' : 'pending'})\n`;
+      const taskId = task._id?.toString() || task.id?.toString() || 'unknown';
+      const taskDate = task.date ? new Date(task.date).toISOString().split('T')[0] : 'no date';
+      prompt += `Task ID: ${taskId} | Title: "${task.title}" | Date: ${taskDate} (${task.priority} priority, ${task.completed ? 'completed' : 'pending'})\n`;
     });
+    prompt += `\nIMPORTANT: When user mentions a task by name, extract BOTH the name AND date (if mentioned) to find the correct task. Use the Task ID from above, NOT the list number.`;
   }
 
   return prompt;

@@ -28,11 +28,11 @@ export const parseIntent = async (userText, userId) => {
       throw new Error('User text is required and must be a non-empty string');
     }
 
-    // Get user's recent tasks for context
+    // Get user's recent tasks for context (include _id for task lookup)
     const recentTasks = await Task.find({ userId })
       .sort({ createdAt: -1 })
       .limit(5)
-      .select('title priority completed date')
+      .select('_id title priority completed date')
       .lean();
 
     const context = { recentTasks };
