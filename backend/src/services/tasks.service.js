@@ -13,11 +13,39 @@ export const getTasks = async (userId, filters = {}) => {
     
     // Filter by date
     if (date) {
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      query.date = { $gte: startOfDay, $lte: endOfDay };
+      // Handle structured date range from AI (new format)
+      if (typeof date === 'object' && date.start && date.end) {
+        const startDate = new Date(date.start);
+        startDate.setHours(0, 0, 0, 0);
+        const endDate = new Date(date.end);
+        endDate.setHours(23, 59, 59, 999);
+        
+        // Validate dates
+        if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
+          query.date = { $gte: startDate, $lte: endDate };
+        } else {
+          logger.warn('Invalid date range from AI:', { date, start: date.start, end: date.end });
+        }
+      } 
+      // Handle string date (backward compatibility)
+      else if (typeof date === 'string') {
+        // Try to parse as YYYY-MM-DD format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          const startOfDay = new Date(date);
+          startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(date);
+          endOfDay.setHours(23, 59, 59, 999);
+          
+          if (!isNaN(startOfDay.getTime())) {
+            query.date = { $gte: startOfDay, $lte: endOfDay };
+          } else {
+            logger.warn('Invalid date string format:', date);
+          }
+        } else {
+          // Relative date string that wasn't converted by AI - log warning and skip
+          logger.warn('Unsupported date filter format (should be converted by AI):', date);
+        }
+      }
     }
     
     // Filter by month
